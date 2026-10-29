@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Une assiette vue de dessus avec une feuille au centre. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Bord de l'assiette -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30 Z" />
+
+    <!-- Feuille -->
+    <path
+        android:fillColor="#CDE8D3"
+        android:pathData="M54,40 C64,45 66,58 54,68 C42,58 44,45 54,40 Z" />
+
+    <!-- Nervure -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#2E6B4F"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round"
+        android:pathData="M54,46 L54,64" />
+</vector>
