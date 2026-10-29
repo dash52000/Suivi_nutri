@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.notif.Rappel
@@ -58,9 +59,10 @@ class MainActivity : ComponentActivity() {
         Rappel.programmer(this)
         val health = HealthData(this)
         val journal = Journal(this)
+        val config = Configuration(this)
         setContent {
             SuiviNutriTheme {
-                App(health, journal)
+                App(health, journal, config)
             }
         }
     }
@@ -74,7 +76,7 @@ enum class Onglet(val libelle: String, val icone: ImageVector) {
 }
 
 @Composable
-fun App(health: HealthData, journal: Journal) {
+fun App(health: HealthData, journal: Journal, config: Configuration) {
     val context = LocalContext.current
     var onglet by rememberSaveable { mutableStateOf(Onglet.SOIR) }
 
@@ -124,10 +126,10 @@ fun App(health: HealthData, journal: Journal) {
     ) { marges ->
         val m = Modifier.padding(marges)
         when (onglet) {
-            Onglet.SOIR -> EcranSoir(journal, health, m)
+            Onglet.SOIR -> EcranSoir(journal, config, health, m)
             Onglet.DONNEES -> EcranDonnees(health, m)
-            Onglet.LABO -> EcranLabo(health, journal, m)
-            Onglet.REGLAGES -> EcranReglages(journal, m)
+            Onglet.LABO -> EcranLabo(health, journal, config, m)
+            Onglet.REGLAGES -> EcranReglages(journal, config, m)
         }
     }
 }

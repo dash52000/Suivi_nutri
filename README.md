@@ -36,6 +36,8 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
 ## Feuille de route
 
 - **v0.1** : squelette, chaîne de build et test de mise à jour sans perte de données
-- **v1** : Health Connect (poids, dépense, activités, sommeil), questionnaire du soir,
-  notif, alcool en unités, estimation des apports, labo, export/import
+- **v0.2** : lecture Health Connect (poids, dépense, activités, sommeil)
+- **v0.3** : questionnaire du soir, alcool en unités, notif, sauvegarde et export CSV
+- **v0.4** : tendance du poids, apports estimés, labo
+- **v0.5** : questions configurables (pause, questions perso) — fin de la v1
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL)

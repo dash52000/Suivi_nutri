@@ -27,6 +27,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
+import io.github.dash52000.suivinutri.data.Configuration
+import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
@@ -70,7 +72,7 @@ private val formatCourt = DateTimeFormatter.ofPattern("d MMM", Locale.FRENCH)
 // ---------- Écran ----------
 
 @Composable
-fun EcranLabo(health: HealthData, journal: Journal, modifier: Modifier = Modifier) {
+fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
     var etat by remember { mutableStateOf<EtatLabo>(EtatLabo.Chargement) }
     var rafraichir by remember { mutableIntStateOf(0) }
 
@@ -84,7 +86,8 @@ fun EcranLabo(health: HealthData, journal: Journal, modifier: Modifier = Modifie
                 val s = sante[d]
                 JourLabo(d, s?.poidsKg, s?.kcalTotal, s?.sommeilMin, entrees[d])
             }
-            EtatLabo.Pret(withContext(Dispatchers.Default) { Labo.analyser(jours, aujourdHui) })
+            val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
+            EtatLabo.Pret(withContext(Dispatchers.Default) { Labo.analyser(jours, aujourdHui, perso) })
         } catch (e: SecurityException) {
             EtatLabo.Erreur("Le labo a besoin de l'accès à Health Connect : autorise-le depuis l'onglet Données.")
         } catch (e: Exception) {

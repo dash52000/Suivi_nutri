@@ -151,7 +151,15 @@ object Labo {
 
     // ---------- Analyse complète ----------
 
-    fun analyser(jours: List<JourLabo>, aujourdHui: LocalDate): ResultatLabo {
+    /**
+     * [reflexesPerso] : questions ajoutées par l'utilisateur, avec leur score (1 = tenu, 0 = pas tenu),
+     * analysées comme les réflexes intégrés.
+     */
+    fun analyser(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        reflexesPerso: List<Pair<String, (EntreeJour) -> Double?>> = emptyList(),
+    ): ResultatLabo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
         val tendance = tendance(tries)
@@ -166,7 +174,7 @@ object Labo {
             poids = poids,
             semaines = semaines.sortedByDescending { it.lundi },
             lendemain = lendemain(tries, parDate),
-            effetsSemaine = effetsSemaine(tries, parDate, semaines),
+            effetsSemaine = effetsSemaine(parDate, semaines, reflexes + reflexesPerso),
             croises = croises(tries, parDate),
             qualite = qualite(tries, parDate, aujourdHui),
         )
@@ -247,14 +255,14 @@ object Labo {
 
     /** Réflexes agrégés par semaine, mis face aux apports estimés de la même semaine. */
     private fun effetsSemaine(
-        tries: List<JourLabo>,
         parDate: Map<LocalDate, JourLabo>,
         semaines: List<SemaineApports>,
+        aAnalyser: List<Pair<String, (EntreeJour) -> Double?>>,
     ): List<EffetSemaine> {
         fun joursDe(s: SemaineApports) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
         fun position(s: SemaineApports) = (s.lundi.toEpochDay() / 7).toInt()
 
-        val effets = reflexes.map { (libelle, score) ->
+        val effets = aAnalyser.map { (libelle, score) ->
             val points = semaines.mapNotNull { s ->
                 val scores = joursDe(s).mapNotNull { j -> j.entree?.let(score) }
                 if (scores.size >= 2) Triple(scores.average(), s.apportsEstimes, position(s)) else null

@@ -67,8 +67,8 @@ class Journal(context: Context) {
     }
 
     /** Une ligne par jour, « NA » pour une question sans réponse : prêt pour read.csv() en R. */
-    fun exportCsv(): String {
-        val ids = Questionnaire.questions.map { it.id }
+    fun exportCsv(perso: List<QuestionPerso> = emptyList()): String {
+        val ids = Questionnaire.questions.map { it.id } + perso.map { it.id }
         val entete = listOf("date") + ids + listOf(Questionnaire.ID_ALCOOL, "nb_boissons", "unites_alcool")
         val lignes = toutes().values.sortedBy { it.date }.map { e ->
             val cellules = mutableListOf(e.date.toString())

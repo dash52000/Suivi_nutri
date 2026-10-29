@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import io.github.dash52000.suivinutri.data.Alcool
 import io.github.dash52000.suivinutri.data.Boisson
 import io.github.dash52000.suivinutri.data.Condition
+import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.data.Question
@@ -63,7 +64,12 @@ private fun fmt(x: Double, decimales: Int): String =
 private fun fmtDegre(d: Double): String = if (d % 1.0 == 0.0) fmt(d, 0) else fmt(d, 1)
 
 @Composable
-fun EcranSoir(journal: Journal, health: HealthData, modifier: Modifier = Modifier) {
+fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
+    // Relu à chaque entrée dans l'onglet : reflète les changements faits dans Réglages.
+    val questions = remember { config.questionnaire() }
+    val idsBeauxParents = remember(questions) {
+        questions.filter { it.condition == Condition.BEAUX_PARENTS }.map { it.id }.toSet()
+    }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var entree by remember(date) { mutableStateOf(journal.entree(date)) }
     var seance by remember(date) { mutableStateOf<Boolean?>(null) }
@@ -92,7 +98,7 @@ fun EcranSoir(journal: Journal, health: HealthData, modifier: Modifier = Modifie
         val reponses = entree.reponses.toMutableMap()
         if (reponses[id] == code) reponses.remove(id) else reponses[id] = code
         if (id == Questionnaire.ID_DINER && reponses[id] != Questionnaire.DINER_BEAUX_PARENTS) {
-            Questionnaire.idsBeauxParents.forEach { reponses.remove(it) }
+            idsBeauxParents.forEach { reponses.remove(it) }
         }
         val boissons = if (id == Questionnaire.ID_ALCOOL && reponses[id] != "oui") emptyList() else entree.boissons
         mettreAJour(entree.copy(reponses = reponses, boissons = boissons))
@@ -133,7 +139,7 @@ fun EcranSoir(journal: Journal, health: HealthData, modifier: Modifier = Modifie
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        Questionnaire.questions.filter { !it.ressenti && visible(it) }.forEach { q ->
+        questions.filter { !it.ressenti && visible(it) }.forEach { q ->
             BlocQuestion(q, entree.reponses[q.id]) { repondre(q.id, it) }
         }
 
@@ -143,11 +149,11 @@ fun EcranSoir(journal: Journal, health: HealthData, modifier: Modifier = Modifie
             onBoissons = { mettreAJour(entree.copy(boissons = it)) },
         )
 
-        TextButton(onClick = { ressentisOuverts = !ressentisOuverts }) {
+        if (questions.any { it.ressenti }) TextButton(onClick = { ressentisOuverts = !ressentisOuverts }) {
             Text(if (ressentisOuverts) "Masquer les ressentis" else "Ressentis (en option)")
         }
         if (ressentisOuverts) {
-            Questionnaire.questions.filter { it.ressenti && visible(it) }.forEach { q ->
+            questions.filter { it.ressenti && visible(it) }.forEach { q ->
                 BlocQuestion(q, entree.reponses[q.id]) { repondre(q.id, it) }
             }
         }
