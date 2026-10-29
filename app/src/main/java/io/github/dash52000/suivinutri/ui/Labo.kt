@@ -32,6 +32,7 @@ import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
@@ -89,6 +90,7 @@ private fun cacheValide(cle: String): EtatLabo.Pret? {
 fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
     var etat by remember { mutableStateOf<EtatLabo>(cacheValide(cleCache(journal, config)) ?: EtatLabo.Chargement) }
     var forcer by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
 
     LaunchedEffect(forcer) {
         val cle = cleCache(journal, config)
@@ -96,9 +98,11 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
             val enCache = cacheValide(cle)
             if (enCache != null) {
                 etat = enCache
+                Usage.log(context, "labo", "cache")
                 return@LaunchedEffect
             }
         }
+        Usage.log(context, "labo", if (forcer == 0) "calcul_auto" else "calcul_force")
         etat = EtatLabo.Chargement
         etat = try {
             val aujourdHui = LocalDate.now()

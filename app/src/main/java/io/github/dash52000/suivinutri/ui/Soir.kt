@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -39,6 +40,7 @@ import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.data.Moment
 import io.github.dash52000.suivinutri.data.Question
 import io.github.dash52000.suivinutri.data.Questionnaire
@@ -67,6 +69,7 @@ private fun fmtDegre(d: Double): String = if (d % 1.0 == 0.0) fmt(d, 0) else fmt
 @Composable
 fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
     // Relu à chaque entrée dans l'onglet : reflète les changements faits dans Réglages.
+    val context = LocalContext.current
     val questions = remember { config.questionnaire() }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var entree by remember(date) { mutableStateOf(journal.entree(date)) }
@@ -95,6 +98,7 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
     fun repondre(id: String, code: String) {
         val reponses = entree.reponses.toMutableMap()
         if (reponses[id] == code) reponses.remove(id) else reponses[id] = code
+        Usage.log(context, "reponse", "jour=$date;question=$id;valeur=${reponses[id] ?: "efface"}")
         // Une question qui devient masquée (ex. « Devant un écran ? » après « Extérieur ») perd sa réponse.
         questions.forEach { q ->
             if (Questionnaire.conditionRemplie(q.condition, reponses) == false) reponses.remove(q.id)
@@ -155,7 +159,10 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
                 BlocAlcool(
                     entree = entree,
                     onRepondre = { repondre(Questionnaire.ID_ALCOOL, it) },
-                    onBoissons = { mettreAJour(entree.copy(boissons = it)) },
+                    onBoissons = {
+                Usage.log(context, "boissons", "jour=$date;nb=${it.size}")
+                mettreAJour(entree.copy(boissons = it))
+            },
                 )
             }
         }

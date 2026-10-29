@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import io.github.dash52000.suivinutri.MainActivity
 import io.github.dash52000.suivinutri.R
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Usage
 import java.time.LocalDate
 import java.time.ZonedDateTime
 
@@ -76,15 +77,28 @@ object Rappel {
         alarmes.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cible.toInstant().toEpochMilli(), intention)
     }
 
+    /** Extra posé sur l'intent de la notif, pour savoir que l'appli a été ouverte par elle. */
+    const val EXTRA_DEPUIS_NOTIF = "depuis_notif"
+
     fun afficher(context: Context) {
-        if (!actif(context) || !notifsAutorisees(context)) return
+        if (!actif(context)) return
+        if (!notifsAutorisees(context)) {
+            Usage.log(context, "notif_non_envoyee", "notifs_refusees")
+            return
+        }
         // Déjà rempli aujourd'hui : pas besoin de rappel.
-        if (!Journal(context).entree(LocalDate.now()).vide) return
+        if (!Journal(context).entree(LocalDate.now()).vide) {
+            Usage.log(context, "notif_non_envoyee", "deja_rempli")
+            return
+        }
 
         val ouvrir = PendingIntent.getActivity(
             context, 1,
             Intent(context, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                .putExtra(EXTRA_DEPUIS_NOTIF, true)
+                .addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                ),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val notif = NotificationCompat.Builder(context, CANAL)
@@ -96,6 +110,7 @@ object Rappel {
             .build()
         try {
             NotificationManagerCompat.from(context).notify(ID_NOTIF, notif)
+            Usage.log(context, "notif_envoyee")
         } catch (_: SecurityException) {
             // Notifs refusées entre-temps : rien à faire.
         }

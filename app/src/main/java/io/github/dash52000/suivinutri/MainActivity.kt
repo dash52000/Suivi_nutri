@@ -2,6 +2,7 @@ package io.github.dash52000.suivinutri
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -43,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.notif.Rappel
 import io.github.dash52000.suivinutri.ui.EcranDonnees
@@ -52,9 +54,28 @@ import io.github.dash52000.suivinutri.ui.EcranSoir
 
 class MainActivity : ComponentActivity() {
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        noterOuvertureParNotif(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        Usage.log(this, "premier_plan")
+    }
+
+    private fun noterOuvertureParNotif(intent: Intent?) {
+        if (intent?.getBooleanExtra(Rappel.EXTRA_DEPUIS_NOTIF, false) == true) {
+            intent.removeExtra(Rappel.EXTRA_DEPUIS_NOTIF)
+            Usage.log(this, "ouverture_notif")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        noterOuvertureParNotif(intent)
         Rappel.creerCanal(this)
         Rappel.programmer(this)
         val health = HealthData(this)
@@ -79,6 +100,7 @@ enum class Onglet(val libelle: String, val icone: ImageVector) {
 fun App(health: HealthData, journal: Journal, config: Configuration) {
     val context = LocalContext.current
     var onglet by rememberSaveable { mutableStateOf(Onglet.SOIR) }
+    LaunchedEffect(onglet) { Usage.log(context, "onglet", onglet.name.lowercase()) }
 
     // Demande l'autorisation des notifs une seule fois, au premier lancement.
     val demanderNotifs = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }

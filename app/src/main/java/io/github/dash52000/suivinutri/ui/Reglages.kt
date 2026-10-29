@@ -47,6 +47,7 @@ import io.github.dash52000.suivinutri.data.Moment
 import io.github.dash52000.suivinutri.data.QuestionPerso
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.TypePerso
+import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.notif.Rappel
 import org.json.JSONObject
 import java.time.LocalDate
@@ -77,10 +78,20 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
             // La sauvegarde contient le journal et la configuration des questions.
             val racine = JSONObject(journal.exportJson()).put("configuration", config.versJson())
             message = ecrire(context, uri, racine.toString(2), "Sauvegarde enregistrée.")
+            Usage.log(context, "export", "json")
         }
     }
     val exporterCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
-        if (uri != null) message = ecrire(context, uri, journal.exportCsv(config.perso()), "CSV enregistré.")
+        if (uri != null) {
+            message = ecrire(context, uri, journal.exportCsv(config.perso()), "CSV enregistré.")
+            Usage.log(context, "export", "csv")
+        }
+    }
+    val exporterUsage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) {
+            Usage.log(context, "export", "usage")
+            message = ecrire(context, uri, Usage.exporter(context), "Journal d'utilisation enregistré.")
+        }
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -89,6 +100,7 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
                     ?: error("fichier illisible")
                 val jours = journal.importJson(texte)
                 JSONObject(texte).optJSONObject("configuration")?.let { config.importer(it) }
+                Usage.log(context, "import", "jours=$jours")
                 "$jours jour(s) restauré(s)."
             } catch (e: Exception) {
                 "Import impossible : ${e.message}"
@@ -112,6 +124,7 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
                 onCheckedChange = {
                     actif = it
                     Rappel.regler(context, it, heure, minute)
+                    Usage.log(context, "reglage", "notif_active=$it")
                 },
             )
         }
@@ -124,6 +137,7 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
                         heure = h
                         minute = m
                         Rappel.regler(context, actif, h, m)
+                        Usage.log(context, "reglage", "notif_heure=%02d:%02d".format(h, m))
                     },
                     heure, minute, true,
                 ).show()
@@ -157,6 +171,7 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
                 onCheckedChange = {
                     masquerPesee = it
                     Affichage.regler(context, it)
+                    Usage.log(context, "reglage", "masquer_pesee=$it")
                 },
             )
         }
@@ -180,6 +195,15 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
         OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "application/octet-stream", "*/*")) }) {
             Text("Restaurer une sauvegarde")
         }
+        OutlinedButton(onClick = { exporterUsage.launch("suivi-nutri-usage-${LocalDate.now()}.csv") }) {
+            Text("Exporter le journal d'utilisation")
+        }
+        Text(
+            "Ce que tu fais dans l'appli (notifs, ouvertures, réponses, écrans consultés), horodaté. " +
+                "Il reste sur le téléphone ; il sert à décider quoi alléger au prochain point.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         message?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
         }
@@ -193,8 +217,11 @@ private fun SectionQuestions(config: Configuration) {
     var formulaireOuvert by remember { mutableStateOf(false) }
     var aSupprimer by remember { mutableStateOf<QuestionPerso?>(null) }
 
+    val context = LocalContext.current
+
     fun basculer(id: String, active: Boolean) {
         config.mettreEnPause(id, !active)
+        Usage.log(context, "reglage", "question=$id;active=$active")
         enPause = config.enPause()
     }
 
@@ -234,7 +261,8 @@ private fun SectionQuestions(config: Configuration) {
         if (formulaireOuvert) {
             FormulaireQuestion(
                 onAjouter = { libelle, type, tenuSi, condition, moment ->
-                    config.ajouter(libelle, type, tenuSi, condition, moment)
+                    val q = config.ajouter(libelle, type, tenuSi, condition, moment)
+                    Usage.log(context, "reglage", "question_ajoutee=${q.id}")
                     perso = config.perso()
                     formulaireOuvert = false
                 },
@@ -255,6 +283,7 @@ private fun SectionQuestions(config: Configuration) {
             confirmButton = {
                 TextButton(onClick = {
                     config.supprimer(q.id)
+                    Usage.log(context, "reglage", "question_supprimee=${q.id}")
                     perso = config.perso()
                     enPause = config.enPause()
                     aSupprimer = null
