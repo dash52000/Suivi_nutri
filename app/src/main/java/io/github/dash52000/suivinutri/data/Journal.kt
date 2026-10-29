@@ -36,6 +36,9 @@ class Journal(context: Context) {
 
     fun entree(date: LocalDate): EntreeJour = toutes()[date] ?: EntreeJour(date)
 
+    /** Horodatage de la dernière écriture, pour savoir si un calcul en cache est périmé. */
+    fun derniereModification(): Long = if (fichier.exists()) fichier.lastModified() else 0L
+
     @Synchronized
     fun enregistrer(entree: EntreeJour) {
         val tout = toutes().toMutableMap()

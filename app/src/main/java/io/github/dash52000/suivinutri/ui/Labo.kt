@@ -42,8 +42,13 @@ import io.github.dash52000.suivinutri.labo.Qualite
 import io.github.dash52000.suivinutri.labo.ResultatLabo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 private sealed interface EtatLabo {
     data object Chargement : EtatLabo
@@ -55,12 +60,43 @@ private sealed interface EtatLabo {
     data class Erreur(val message: String) : EtatLabo
 }
 
+/**
+ * Dernier calcul du labo, gardé tant que l'appli tourne : changer d'onglet ne relance pas
+ * la lecture d'un an de Health Connect. Recalcul si le jour, le journal ou les questions changent,
+ * si le calcul a plus de 3 heures, ou à la demande.
+ */
+private object CacheLabo {
+    var etat: EtatLabo.Pret? = null
+    var cle: String = ""
+    var calculeLe: Instant = Instant.EPOCH
+}
+
+private const val DUREE_CACHE_HEURES = 3L
+private val formatHeure = DateTimeFormatter.ofPattern("HH:mm", Locale.FRENCH)
+
+private fun cleCache(journal: Journal, config: Configuration): String =
+    "${LocalDate.now()}|${journal.derniereModification()}|${config.signature()}"
+
+private fun cacheValide(cle: String): EtatLabo.Pret? {
+    val etat = CacheLabo.etat ?: return null
+    val age = Duration.between(CacheLabo.calculeLe, Instant.now())
+    return if (CacheLabo.cle == cle && age < Duration.ofHours(DUREE_CACHE_HEURES)) etat else null
+}
+
 @Composable
 fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
-    var etat by remember { mutableStateOf<EtatLabo>(EtatLabo.Chargement) }
-    var rafraichir by remember { mutableIntStateOf(0) }
+    var etat by remember { mutableStateOf<EtatLabo>(cacheValide(cleCache(journal, config)) ?: EtatLabo.Chargement) }
+    var forcer by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(rafraichir) {
+    LaunchedEffect(forcer) {
+        val cle = cleCache(journal, config)
+        if (forcer == 0) {
+            val enCache = cacheValide(cle)
+            if (enCache != null) {
+                etat = enCache
+                return@LaunchedEffect
+            }
+        }
         etat = EtatLabo.Chargement
         etat = try {
             val aujourdHui = LocalDate.now()
@@ -72,13 +108,17 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
             }
             val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
             val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
-            withContext(Dispatchers.Default) {
+            val pret = withContext(Dispatchers.Default) {
                 EtatLabo.Pret(
                     resultat = Labo.analyser(jours, aujourdHui, perso),
                     calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),
                     dates28 = dates28,
                 )
             }
+            CacheLabo.etat = pret
+            CacheLabo.cle = cle
+            CacheLabo.calculeLe = Instant.now()
+            pret
         } catch (e: SecurityException) {
             EtatLabo.Erreur("Le labo a besoin de l'accès à Health Connect : autorise-le depuis l'onglet Données.")
         } catch (e: Exception) {
@@ -101,7 +141,15 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
             is EtatLabo.Erreur -> Text(e.message, style = MaterialTheme.typography.bodyLarge)
             is EtatLabo.Pret -> ContenuLabo(e)
         }
-        OutlinedButton(onClick = { rafraichir++ }) { Text("Recalculer") }
+        if (etat is EtatLabo.Pret) {
+            Text(
+                "Calculé à ${CacheLabo.calculeLe.atZone(ZoneId.systemDefault()).format(formatHeure)}. " +
+                    "Recalcul automatique si tu réponds au questionnaire, sinon toutes les $DUREE_CACHE_HEURES heures.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        OutlinedButton(onClick = { forcer++ }) { Text("Recalculer maintenant") }
     }
 }
 

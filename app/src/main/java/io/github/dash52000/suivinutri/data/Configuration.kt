@@ -70,6 +70,9 @@ class Configuration(context: Context) {
         return liste.filter { it.id !in pause }
     }
 
+    /** Change dès qu'une question est ajoutée, supprimée ou mise en pause. */
+    fun signature(): Int = (perso().toString() + enPause().sorted().toString()).hashCode()
+
     // ---------- Sauvegarde ----------
 
     fun versJson(): JSONObject = JSONObject()
