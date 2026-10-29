@@ -99,21 +99,32 @@ class HealthData(context: Context) {
 
     private fun LocalDate.debutInstant(): Instant = atStartOfDay(zone).toInstant()
 
-    /** Calories totales par jour, agrégées par Health Connect (qui gère les doublons entre sources). */
-    private suspend fun kcalParJour(debut: LocalDate, fin: LocalDate): Map<LocalDate, Double?> =
-        client.aggregateGroupByPeriod(
-            AggregateGroupByPeriodRequest(
-                metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
-                timeRangeFilter = TimeRangeFilter.between(
-                    debut.atStartOfDay(),
-                    fin.plusDays(1).atStartOfDay(),
-                ),
-                timeRangeSlicer = Period.ofDays(1),
-            )
-        ).associate { groupe ->
-            groupe.startTime.toLocalDate() to
-                groupe.result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
+    /**
+     * Calories totales par jour, agrégées par Health Connect (qui gère les doublons entre sources).
+     * Par tranches de 60 jours, pour rester sous les limites de l'API sur les longues périodes.
+     */
+    private suspend fun kcalParJour(debut: LocalDate, fin: LocalDate): Map<LocalDate, Double?> {
+        val resultat = mutableMapOf<LocalDate, Double?>()
+        var tranche = debut
+        while (!tranche.isAfter(fin)) {
+            val finTranche = minOf(tranche.plusDays(59), fin)
+            client.aggregateGroupByPeriod(
+                AggregateGroupByPeriodRequest(
+                    metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(
+                        tranche.atStartOfDay(),
+                        finTranche.plusDays(1).atStartOfDay(),
+                    ),
+                    timeRangeSlicer = Period.ofDays(1),
+                )
+            ).forEach { groupe ->
+                resultat[groupe.startTime.toLocalDate()] =
+                    groupe.result[TotalCaloriesBurnedRecord.ENERGY_TOTAL]?.inKilocalories
+            }
+            tranche = finTranche.plusDays(1)
         }
+        return resultat
+    }
 
     /** Durée de sommeil d'une nuit, sans les phases d'éveil quand Garmin fournit les phases. */
     private fun dureeSommeilMin(nuit: SleepSessionRecord): Long {

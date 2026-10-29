@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
@@ -44,6 +45,7 @@ import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.notif.Rappel
 import io.github.dash52000.suivinutri.ui.EcranDonnees
+import io.github.dash52000.suivinutri.ui.EcranLabo
 import io.github.dash52000.suivinutri.ui.EcranReglages
 import io.github.dash52000.suivinutri.ui.EcranSoir
 
@@ -67,6 +69,7 @@ class MainActivity : ComponentActivity() {
 enum class Onglet(val libelle: String, val icone: ImageVector) {
     SOIR("Ce soir", Icons.Filled.Edit),
     DONNEES("Données", Icons.Filled.DateRange),
+    LABO("Labo", Icons.Filled.Build),
     REGLAGES("Réglages", Icons.Filled.Settings),
 }
 
@@ -123,6 +126,7 @@ fun App(health: HealthData, journal: Journal) {
         when (onglet) {
             Onglet.SOIR -> EcranSoir(journal, health, m)
             Onglet.DONNEES -> EcranDonnees(health, m)
+            Onglet.LABO -> EcranLabo(health, journal, m)
             Onglet.REGLAGES -> EcranReglages(journal, m)
         }
     }

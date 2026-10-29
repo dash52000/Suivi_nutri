@@ -76,4 +76,14 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
 
     implementation("androidx.health.connect:connect-client:1.1.0")
+
+    testImplementation("junit:junit:4.13.2")
+}
+
+// En CI, un test raté doit afficher l'assertion complète (remontée en annotation par le workflow).
+tasks.withType<Test>().configureEach {
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
