@@ -11,7 +11,9 @@ val keystorePassword: String? = System.getenv("KEYSTORE_PASSWORD")
 val keyAliasName: String = System.getenv("KEY_ALIAS") ?: "suivinutri"
 
 // versionCode croissant à chaque build GitHub, pour que les mises à jour s'installent par-dessus.
+// Le nom de version vient du workflow (VERSION_NAME), seule source du numéro.
 val buildNumber: Int = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
+val versionNameEnv: String = System.getenv("VERSION_NAME") ?: "dev.$buildNumber"
 
 android {
     namespace = "io.github.dash52000.suivinutri"
@@ -22,7 +24,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = buildNumber
-        versionName = "0.1.$buildNumber"
+        versionName = versionNameEnv
     }
 
     signingConfigs {
@@ -71,4 +73,6 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+
+    implementation("androidx.health.connect:connect-client:1.1.0")
 }

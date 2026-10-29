@@ -13,11 +13,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VERSION_NAME: 0.1.${{ github.run_number }}
+      # Seule source du numéro de version : préfixe + numéro de build GitHub.
+      VERSION_NAME: 0.2.${{ github.run_number }}
 
     steps:
       - name: Récupérer le code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Vérifier les secrets de signature
         id: cle
@@ -33,7 +34,7 @@ jobs:
           fi
 
       - name: Installer Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -54,7 +55,18 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: suivinutri
           BUILD_NUMBER: ${{ github.run_number }}
-        run: ./gradlew --no-daemon assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon assembleRelease 2>&1 | tee build.log
+
+      - name: Remonter les erreurs de compilation
+        if: failure()
+        run: |
+          [ -f build.log ] || exit 0
+          grep -E "^e: |^w: .*(error|unresolved)|What went wrong|^> |Could not|error:" build.log | head -60 > erreurs.txt || true
+          [ -s erreurs.txt ] || tail -40 build.log > erreurs.txt
+          msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' erreurs.txt | awk '{printf "%s%%0A", $0}')
+          echo "::error title=Erreurs de build::$msg"
 
       - name: Vérifier la signature
         if: steps.cle.outputs.presente == 'true'
