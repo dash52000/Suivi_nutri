@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.health.DiagnosticCalories
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.health.Journee
@@ -123,7 +124,11 @@ fun EcranDonnees(health: HealthData, modifier: Modifier = Modifier) {
                 action = { rafraichir++ },
             )
 
-            is EtatDonnees.Donnees -> ListeDonnees(e, onActualiser = { rafraichir++ })
+            is EtatDonnees.Donnees -> ListeDonnees(
+                e,
+                masquerPesee = Affichage.masquerPesee(context),
+                onActualiser = { rafraichir++ },
+            )
         }
     }
 }
@@ -141,7 +146,7 @@ private fun Message(titre: String, texte: String, bouton: String?, action: () ->
 }
 
 @Composable
-private fun ListeDonnees(etat: EtatDonnees.Donnees, onActualiser: () -> Unit) {
+private fun ListeDonnees(etat: EtatDonnees.Donnees, masquerPesee: Boolean, onActualiser: () -> Unit) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
@@ -162,7 +167,7 @@ private fun ListeDonnees(etat: EtatDonnees.Donnees, onActualiser: () -> Unit) {
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
-        items(etat.jours, key = { it.date.toString() }) { CarteJour(it) }
+        items(etat.jours, key = { it.date.toString() }) { CarteJour(it, masquerPesee) }
         item {
             OutlinedButton(onClick = onActualiser, modifier = Modifier.padding(top = 8.dp)) {
                 Text("Actualiser")
@@ -195,7 +200,7 @@ private fun CarteDiagnostic(d: DiagnosticCalories) {
 }
 
 @Composable
-private fun CarteJour(j: Journee) {
+private fun CarteJour(j: Journee, masquerPesee: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -204,7 +209,11 @@ private fun CarteJour(j: Journee) {
             )
             Text(
                 listOf(
-                    j.poidsKg?.let { String.format(Locale.FRENCH, "%.1f kg", it) } ?: "Pas de pesée",
+                    when {
+                        j.poidsKg == null -> "Pas de pesée"
+                        masquerPesee -> "Pesée enregistrée"
+                        else -> String.format(Locale.FRENCH, "%.1f kg", j.poidsKg)
+                    },
                     kcal(j.kcalTotal),
                     j.sommeilMin?.let { "Sommeil ${dureeHeures(it)}" } ?: "Sommeil —",
                 ).joinToString("  ·  "),

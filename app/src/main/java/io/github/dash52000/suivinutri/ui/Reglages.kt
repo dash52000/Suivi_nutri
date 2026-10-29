@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
@@ -64,6 +65,7 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
     var minute by remember { mutableIntStateOf(Rappel.minute(context)) }
     var notifsOk by remember { mutableStateOf(Rappel.notifsAutorisees(context)) }
     var message by remember { mutableStateOf<String?>(null) }
+    var masquerPesee by remember { mutableStateOf(Affichage.masquerPesee(context)) }
 
     val demanderNotifs = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notifsOk = it
@@ -137,6 +139,25 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
             }
         }
 
+        HorizontalDivider()
+        Text("Affichage", style = MaterialTheme.typography.titleMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Masquer la pesée du jour")
+                Text(
+                    "Seule la tendance lissée s'affiche. Les calculs du labo restent identiques.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = masquerPesee,
+                onCheckedChange = {
+                    masquerPesee = it
+                    Affichage.regler(context, it)
+                },
+            )
+        }
         HorizontalDivider()
         SectionQuestions(config)
         HorizontalDivider()

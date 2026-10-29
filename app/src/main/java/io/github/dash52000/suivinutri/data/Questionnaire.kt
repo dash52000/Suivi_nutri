@@ -48,6 +48,10 @@ object Questionnaire {
             options("oui" to "Oui", "en_partie" to "En partie", "non" to "Non", "pas_possible" to "Pas possible"),
         ),
         Question(
+            "temps", "Pris ton temps sur la première assiette ?",
+            options("oui" to "Oui", "a_moitie" to "À moitié", "non" to "Non"),
+        ),
+        Question(
             "plaisir_baisse", "Le plaisir a baissé en fin d'assiette ?",
             options("oui" to "Oui", "non" to "Non", "pas_fait_gaffe" to "Pas fait gaffe"),
         ),

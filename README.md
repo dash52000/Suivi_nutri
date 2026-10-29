@@ -27,6 +27,11 @@ jour qui s'installe par-dessus l'appli existante.
 - Effet lendemain : différence de moyennes, intervalle de Welch.
 - Effets sur plusieurs semaines : pente de régression, un réflexe à la fois,
   erreur-type de Newey-West (retard 1, seules les semaines voisines comptent).
+  Les apports de chaque semaine y sont recalculés sans le retard de la tendance
+  lissée (≈ 9 jours) : dépense + (moyenne des pesées de la semaine suivante −
+  moyenne de la semaine précédente) ÷ 2 × 7 700 ÷ 7, fenêtre centrée sur la semaine.
+- Niveau absolu des apports probablement surestimé (dépense de la montre) :
+  seules les variations sont interprétées.
 - Effets croisés : différence de proportions, intervalle d'Agresti-Caffo.
 - Minimum : 5 observations par groupe, 8 semaines pour les régressions.
 
@@ -42,4 +47,5 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
 - **v0.5** : questions configurables (pause, questions perso) — fin de la v1
 - **v0.6** : bilan des 7 derniers jours, graphes du labo (apports/dépense, calendrier des réflexes,
   forest plots des effets, décroissance J+1 à J+3)
+- **v0.7** : question « pris ton temps », analyse hebdo alignée, option « masquer la pesée du jour »
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL)

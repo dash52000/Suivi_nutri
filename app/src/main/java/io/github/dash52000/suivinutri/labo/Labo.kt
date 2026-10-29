@@ -26,6 +26,9 @@ data class SemaineApports(
     val nbJoursDepense: Int,
 )
 
+/** Apports d'une semaine, alignés dans le temps pour l'analyse des réflexes. */
+data class SemaineAnalyse(val lundi: LocalDate, val apports: Double)
+
 /** Écart de poids après un soir « exposé », comparé aux autres soirs. */
 data class EffetLendemain(
     val libelle: String,
@@ -106,6 +109,9 @@ object Labo {
         "Assiette équilibrée" to { e: EntreeJour ->
             when (e.rep("assiette")) { "oui" -> 1.0; "en_partie" -> 0.5; "non" -> 0.0; else -> null }
         },
+        "Pris ton temps" to { e: EntreeJour ->
+            when (e.rep("temps")) { "oui" -> 1.0; "a_moitie" -> 0.5; "non" -> 0.0; else -> null }
+        },
         "Pas de rab" to { e: EntreeJour ->
             when (e.rep("resservi")) { "non" -> 1.0; "un_peu" -> 0.5; "oui" -> 0.0; else -> null }
         },
@@ -176,12 +182,13 @@ object Labo {
             .mapNotNull { j -> tendance[j.date]?.let { PointPoids(j.date, j.poids, it) } }
 
         val semaines = semaines(tries, parDate, tendance, aujourdHui)
+        val analyse = semainesAnalyse(tries, aujourdHui)
 
         return ResultatLabo(
             poids = poids,
             semaines = semaines.sortedByDescending { it.lundi },
             lendemain = lendemain(tries, parDate),
-            effetsSemaine = effetsSemaine(parDate, semaines, reflexes + reflexesPerso),
+            effetsSemaine = effetsSemaine(parDate, analyse, reflexes + reflexesPerso),
             croises = croises(tries, parDate),
             qualite = qualite(tries, parDate, aujourdHui),
         )
@@ -212,6 +219,38 @@ object Labo {
                 val depense = kcal.average()
                 val delta = tFin - tDebut
                 resultat += SemaineApports(lundi, depense, delta, depense + delta * KCAL_PAR_KG / 7, pesees, kcal.size)
+            }
+            lundi = lundi.plusWeeks(1)
+        }
+        return resultat
+    }
+
+    /**
+     * Apports de la semaine pour l'analyse, sans le retard de la tendance lissée (environ 9 jours) :
+     * dépense moyenne de la semaine + différence centrée des pesées moyennes,
+     * (moyenne semaine suivante − moyenne semaine précédente) ÷ 2, × 7 700 kcal/kg ÷ 7.
+     * La fenêtre est centrée sur la semaine, donc alignée avec les réflexes de cette même semaine.
+     * Il faut au moins 3 pesées dans chacune des semaines voisines et 5 jours de dépense.
+     */
+    fun semainesAnalyse(jours: List<JourLabo>, aujourdHui: LocalDate): List<SemaineAnalyse> {
+        if (jours.isEmpty()) return emptyList()
+        val parDate = jours.associateBy { it.date }
+        fun moyennePesees(lundi: LocalDate): Double? {
+            val p = (0L..6L).mapNotNull { parDate[lundi.plusDays(it)]?.poids }
+            return if (p.size >= 3) p.average() else null
+        }
+        val premierLundi = jours.minOf { it.date }.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        // La semaine suivante doit être complète : la dernière semaine analysable est l'avant-dernière.
+        val dernierLundi = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(2)
+        val resultat = mutableListOf<SemaineAnalyse>()
+        var lundi = premierLundi
+        while (!lundi.isAfter(dernierLundi)) {
+            val avant = moyennePesees(lundi.minusWeeks(1))
+            val apres = moyennePesees(lundi.plusWeeks(1))
+            val kcal = (0L..6L).mapNotNull { parDate[lundi.plusDays(it)]?.kcal }.filter { it >= KCAL_JOUR_MIN }
+            if (avant != null && apres != null && kcal.size >= 5) {
+                val deltaSemaine = (apres - avant) / 2
+                resultat += SemaineAnalyse(lundi, kcal.average() + deltaSemaine * KCAL_PAR_KG / 7)
             }
             lundi = lundi.plusWeeks(1)
         }
@@ -260,19 +299,19 @@ object Labo {
         }
     }
 
-    /** Réflexes agrégés par semaine, mis face aux apports estimés de la même semaine. */
+    /** Réflexes agrégés par semaine, mis face aux apports de la même semaine (version alignée). */
     private fun effetsSemaine(
         parDate: Map<LocalDate, JourLabo>,
-        semaines: List<SemaineApports>,
+        semaines: List<SemaineAnalyse>,
         aAnalyser: List<Pair<String, (EntreeJour) -> Double?>>,
     ): List<EffetSemaine> {
-        fun joursDe(s: SemaineApports) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
-        fun position(s: SemaineApports) = (s.lundi.toEpochDay() / 7).toInt()
+        fun joursDe(s: SemaineAnalyse) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
+        fun position(s: SemaineAnalyse) = (s.lundi.toEpochDay() / 7).toInt()
 
         val effets = aAnalyser.map { (libelle, score) ->
             val points = semaines.mapNotNull { s ->
                 val scores = joursDe(s).mapNotNull { j -> j.entree?.let(score) }
-                if (scores.size >= 2) Triple(scores.average(), s.apportsEstimes, position(s)) else null
+                if (scores.size >= 2) Triple(scores.average(), s.apports, position(s)) else null
             }
             val effet = if (points.size >= MIN_SEMAINES) {
                 Stats.penteNeweyWest(points.map { it.first }, points.map { it.second }, points.map { it.third })
@@ -283,7 +322,7 @@ object Labo {
 
         val pointsAlcool = semaines.mapNotNull { s ->
             val u = joursDe(s).mapNotNull { unites(it.entree) }
-            if (u.size >= 4) Triple(u.sum() / u.size * 7, s.apportsEstimes, position(s)) else null
+            if (u.size >= 4) Triple(u.sum() / u.size * 7, s.apports, position(s)) else null
         }
         val effetAlcool = if (pointsAlcool.size >= MIN_SEMAINES) {
             Stats.penteNeweyWest(pointsAlcool.map { it.first }, pointsAlcool.map { it.second }, pointsAlcool.map { it.third })

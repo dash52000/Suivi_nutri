@@ -26,7 +26,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
@@ -175,14 +177,20 @@ private fun Ligne(texte: String) {
 private fun ContenuLabo(etat: EtatLabo.Pret) {
     val r = etat.resultat
 
-    Section("Poids", "Des points pour les pesées, un trait pour la tendance lissée : c'est elle qui compte.") {
-        GraphePoids(r.poids)
+    val masquerPesee = Affichage.masquerPesee(LocalContext.current)
+    Section(
+        "Poids",
+        if (masquerPesee) "La tendance lissée, sans les pesées du jour."
+        else "Des points pour les pesées, un trait pour la tendance lissée : c'est elle qui compte.",
+    ) {
+        GraphePoids(r.poids, masquerPesee)
     }
 
     Section(
         "Apports estimés",
-        "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg. Approximatif : la montre et la " +
-            "règle se trompent toutes les deux, mais la tendance sur plusieurs semaines reste parlante.",
+        "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg. Le niveau absolu est sans doute " +
+            "surestimé, car les montres surestiment souvent la dépense : fie-toi aux variations d'une semaine " +
+            "à l'autre, pas au chiffre brut.",
     ) {
         if (r.semaines.size < 2) {
             Ligne(
@@ -220,8 +228,10 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
 
     Section(
         "Sur plusieurs semaines",
-        "Effet sur les apports estimés, un réflexe à la fois. Corrélation, pas causalité : une semaine " +
-            "chargée peut à la fois faire sauter des réflexes et changer tes apports.",
+        "Effet sur les apports, un réflexe à la fois. Pour rester aligné sur la semaine des réflexes, l'analyse " +
+            "utilise les pesées moyennes des semaines voisines plutôt que la courbe lissée, qui a environ " +
+            "9 jours de retard. Corrélation, pas causalité : une semaine chargée peut à la fois faire sauter " +
+            "des réflexes et changer tes apports.",
     ) {
         ForestPlot(r.effetsSemaine.map { itemSemaine(it) }, "kcal/j", 0)
     }
@@ -293,12 +303,12 @@ private fun LigneQualite(q: Qualite) {
 }
 
 @Composable
-private fun GraphePoids(points: List<PointPoids>) {
+private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
     if (points.size < 2) {
         Ligne("Pas encore assez de pesées pour tracer la courbe.")
         return
     }
-    val valeurs = points.flatMap { listOfNotNull(it.brut, it.tendance) }
+    val valeurs = points.flatMap { if (masquerPesee) listOf(it.tendance) else listOfNotNull(it.brut, it.tendance) }
     val min = valeurs.min() - 0.3
     val max = valeurs.max() + 0.3
     val debut = points.first().date
@@ -324,7 +334,7 @@ private fun GraphePoids(points: List<PointPoids>) {
             ) {
                 fun x(d: LocalDate) = size.width * ChronoUnit.DAYS.between(debut, d) / etendue
                 fun y(v: Double) = (size.height * (max - v) / (max - min)).toFloat()
-                points.forEach { p ->
+                if (!masquerPesee) points.forEach { p ->
                     p.brut?.let { drawCircle(couleurPesees, radius = 3.dp.toPx(), center = Offset(x(p.date), y(it))) }
                 }
                 val chemin = Path()
