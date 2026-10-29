@@ -17,7 +17,7 @@ val versionNameEnv: String = System.getenv("VERSION_NAME") ?: "dev.$buildNumber"
 
 android {
     namespace = "io.github.dash52000.suivinutri"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.dash52000.suivinutri"

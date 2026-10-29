@@ -63,7 +63,10 @@ jobs:
         if: failure()
         run: |
           [ -f build.log ] || exit 0
-          grep -E "^e: |^w: .*(error|unresolved)|What went wrong|^> |Could not|error:" build.log | head -60 > erreurs.txt || true
+          {
+            grep -E "^e: " build.log | head -40
+            awk '/What went wrong/{n=30} n>0{print; n--}' build.log
+          } > erreurs.txt || true
           [ -s erreurs.txt ] || tail -40 build.log > erreurs.txt
           msg=$(sed -e 's/%/%25/g' -e 's/\r/%0D/g' erreurs.txt | awk '{printf "%s%%0A", $0}')
           echo "::error title=Erreurs de build::$msg"
