@@ -40,4 +40,6 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
 - **v0.3** : questionnaire du soir, alcool en unités, notif, sauvegarde et export CSV
 - **v0.4** : tendance du poids, apports estimés, labo
 - **v0.5** : questions configurables (pause, questions perso) — fin de la v1
+- **v0.6** : bilan des 7 derniers jours, graphes du labo (apports/dépense, calendrier des réflexes,
+  forest plots des effets, décroissance J+1 à J+3)
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL)

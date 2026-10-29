@@ -14,7 +14,7 @@ jobs:
 
     env:
       # Seule source du numéro de version : préfixe + numéro de build GitHub.
-      VERSION_NAME: 0.5.${{ github.run_number }}
+      VERSION_NAME: 0.6.${{ github.run_number }}
 
     steps:
       - name: Récupérer le code

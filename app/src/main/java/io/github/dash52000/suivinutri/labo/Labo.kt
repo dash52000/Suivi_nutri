@@ -64,6 +64,13 @@ data class Qualite(
     val nAvec: Int,
 )
 
+/** Une ligne du calendrier des réflexes. */
+data class LigneCalendrier(val libelle: String, val scores: List<Double?>) {
+    /** Somme des scores (un « à moitié » compte pour 0,5) sur les jours renseignés. */
+    val tenus: Double get() = scores.filterNotNull().sum()
+    val repondus: Int get() = scores.count { it != null }
+}
+
 data class ResultatLabo(
     val poids: List<PointPoids>,
     val semaines: List<SemaineApports>,
@@ -89,7 +96,7 @@ object Labo {
     private fun EntreeJour.rep(id: String): String? = reponses[id]
 
     /** Score de chaque réflexe un soir donné : 1 = tenu, 0 = pas tenu, null = sans objet ou sans réponse. */
-    private val reflexes: List<Pair<String, (EntreeJour) -> Double?>> = listOf(
+    val reflexes: List<Pair<String, (EntreeJour) -> Double?>> = listOf(
         "Boîtes posées" to { e: EntreeJour ->
             when (e.rep("boites")) { "oui" -> 1.0; "non" -> 0.0; else -> null }
         },
@@ -340,6 +347,19 @@ object Labo {
             nAvec = avec.size,
         )
     }
+
+    /**
+     * Une ligne par réflexe, une case par date : 1 = tenu, 0,5 = à moitié, 0 = pas tenu, null = sans réponse.
+     * Les réflexes sans aucune réponse sur la période sont omis.
+     */
+    fun calendrier(
+        entrees: Map<LocalDate, EntreeJour>,
+        dates: List<LocalDate>,
+        aAnalyser: List<Pair<String, (EntreeJour) -> Double?>>,
+    ): List<LigneCalendrier> =
+        aAnalyser
+            .map { (libelle, score) -> LigneCalendrier(libelle, dates.map { d -> entrees[d]?.let(score) }) }
+            .filter { ligne -> ligne.scores.any { it != null } }
 
     /** Nombre de jours couverts, pour l'affichage. */
     fun etendue(jours: List<JourLabo>): Long =

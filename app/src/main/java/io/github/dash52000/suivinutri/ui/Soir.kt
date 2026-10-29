@@ -157,6 +157,11 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
                 BlocQuestion(q, entree.reponses[q.id]) { repondre(q.id, it) }
             }
         }
+        // Bilan : relu à chaque réponse, pour que le constat suive ce que tu viens de saisir.
+        val toutes = remember(entree) { journal.toutes() }
+        val perso = remember { config.perso() }
+        BilanSemaine(toutes, perso, date)
+
         Spacer(Modifier.height(24.dp))
     }
 }

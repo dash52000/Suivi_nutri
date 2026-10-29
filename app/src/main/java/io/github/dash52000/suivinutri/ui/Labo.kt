@@ -34,42 +34,26 @@ import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.EffetSemaine
-import io.github.dash52000.suivinutri.labo.Intervalle
 import io.github.dash52000.suivinutri.labo.JourLabo
 import io.github.dash52000.suivinutri.labo.Labo
+import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
 import io.github.dash52000.suivinutri.labo.Qualite
 import io.github.dash52000.suivinutri.labo.ResultatLabo
-import io.github.dash52000.suivinutri.labo.SemaineApports
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import java.util.Locale
 
 private sealed interface EtatLabo {
     data object Chargement : EtatLabo
-    data class Pret(val resultat: ResultatLabo) : EtatLabo
+    data class Pret(
+        val resultat: ResultatLabo,
+        val calendrier: List<LigneCalendrier>,
+        val dates28: List<LocalDate>,
+    ) : EtatLabo
     data class Erreur(val message: String) : EtatLabo
 }
-
-// ---------- Mise en forme ----------
-
-private fun signe(x: Double, decimales: Int, unite: String): String =
-    String.format(Locale.FRENCH, "%+,.${decimales}f", x).replace('-', '−') + " " + unite
-
-private fun nombre(x: Double, decimales: Int): String =
-    String.format(Locale.FRENCH, "%,.${decimales}f", x).replace('-', '−')
-
-private fun ic(i: Intervalle, decimales: Int, unite: String): String =
-    "IC 95 % : ${signe(i.bas, decimales, unite)} à ${signe(i.haut, decimales, unite)}"
-
-private fun pourcent(p: Double): String = String.format(Locale.FRENCH, "%.0f %%", p * 100)
-
-private val formatCourt = DateTimeFormatter.ofPattern("d MMM", Locale.FRENCH)
-
-// ---------- Écran ----------
 
 @Composable
 fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
@@ -87,7 +71,14 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
                 JourLabo(d, s?.poidsKg, s?.kcalTotal, s?.sommeilMin, entrees[d])
             }
             val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
-            EtatLabo.Pret(withContext(Dispatchers.Default) { Labo.analyser(jours, aujourdHui, perso) })
+            val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
+            withContext(Dispatchers.Default) {
+                EtatLabo.Pret(
+                    resultat = Labo.analyser(jours, aujourdHui, perso),
+                    calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),
+                    dates28 = dates28,
+                )
+            }
         } catch (e: SecurityException) {
             EtatLabo.Erreur("Le labo a besoin de l'accès à Health Connect : autorise-le depuis l'onglet Données.")
         } catch (e: Exception) {
@@ -100,7 +91,7 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         when (val e = etat) {
             EtatLabo.Chargement -> {
@@ -108,7 +99,7 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
                 CircularProgressIndicator()
             }
             is EtatLabo.Erreur -> Text(e.message, style = MaterialTheme.typography.bodyLarge)
-            is EtatLabo.Pret -> ContenuLabo(e.resultat)
+            is EtatLabo.Pret -> ContenuLabo(e)
         }
         OutlinedButton(onClick = { rafraichir++ }) { Text("Recalculer") }
     }
@@ -133,8 +124,10 @@ private fun Ligne(texte: String) {
 }
 
 @Composable
-private fun ContenuLabo(r: ResultatLabo) {
-    Section("Poids", "La courbe lissée compte ; la pesée du jour, beaucoup moins.") {
+private fun ContenuLabo(etat: EtatLabo.Pret) {
+    val r = etat.resultat
+
+    Section("Poids", "Des points pour les pesées, un trait pour la tendance lissée : c'est elle qui compte.") {
         GraphePoids(r.poids)
     }
 
@@ -143,13 +136,28 @@ private fun ContenuLabo(r: ResultatLabo) {
         "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg. Approximatif : la montre et la " +
             "règle se trompent toutes les deux, mais la tendance sur plusieurs semaines reste parlante.",
     ) {
-        if (r.semaines.isEmpty()) {
+        if (r.semaines.size < 2) {
             Ligne(
-                "Pas encore de semaine exploitable : il faut une semaine complète avec au moins 3 pesées " +
+                "Pas encore assez de semaines exploitables : il faut des semaines complètes avec au moins 3 pesées " +
                     "et 5 jours de dépense, après une dizaine de jours de pesées."
             )
         } else {
-            r.semaines.take(12).forEach { LigneSemaine(it) }
+            GrapheSemaines(r.semaines)
+            val derniere = r.semaines.first()
+            Text(
+                "Semaine du ${derniere.lundi.format(formatCourt)} : apports ≈ " +
+                    "${nombre(Math.round(derniere.apportsEstimes / 50.0) * 50.0, 0)} kcal/j pour une dépense de " +
+                    "${nombre(derniere.depenseMoyenne, 0)} (tendance ${signe(derniere.deltaTendanceKg, 2, "kg")}).",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+
+    Section("Tes réflexes, 4 dernières semaines", null) {
+        if (etat.calendrier.isEmpty()) {
+            Ligne("Le calendrier se remplira avec tes réponses du soir.")
+        } else {
+            CalendrierLong(etat.calendrier, etat.dates28)
         }
     }
 
@@ -158,19 +166,20 @@ private fun ContenuLabo(r: ResultatLabo) {
         "Le poids du lendemain bouge surtout avec l'eau, le sel et le glycogène. " +
             "Ce qui compte, c'est que l'écart retombe en 2 ou 3 jours.",
     ) {
-        r.lendemain.forEach { LigneLendemain(it) }
+        ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
+        GrapheDecroissance(r.lendemain)
     }
 
     Section(
         "Sur plusieurs semaines",
-        "Les semaines comparées entre elles, un réflexe à la fois. Corrélation, pas causalité : une semaine " +
+        "Effet sur les apports estimés, un réflexe à la fois. Corrélation, pas causalité : une semaine " +
             "chargée peut à la fois faire sauter des réflexes et changer tes apports.",
     ) {
-        r.effetsSemaine.forEach { LigneEffetSemaine(it) }
+        ForestPlot(r.effetsSemaine.map { itemSemaine(it) }, "kcal/j", 0)
     }
 
-    Section("Effets croisés", null) {
-        r.croises.forEach { LigneCroise(it) }
+    Section("Effets croisés", "Écart de fréquence, en points de pourcentage.") {
+        ForestPlot(r.croises.map { itemCroise(it) }, "pts", 0)
     }
 
     Section("Qualité des données", null) {
@@ -178,55 +187,42 @@ private fun ContenuLabo(r: ResultatLabo) {
     }
 }
 
-@Composable
-private fun LigneSemaine(s: SemaineApports) {
-    Ligne(
-        "Semaine du ${s.lundi.format(formatCourt)} : apports ≈ ${nombre(Math.round(s.apportsEstimes / 50.0) * 50.0, 0)} kcal/j " +
-            "· dépense ${nombre(s.depenseMoyenne, 0)} · tendance ${signe(s.deltaTendanceKg, 2, "kg")}"
-    )
-}
-
-@Composable
-private fun LigneLendemain(e: EffetLendemain) {
+private fun itemLendemain(e: EffetLendemain): ItemForest {
     val j1 = e.j1
-    val texte = if (j1 == null) {
-        "${e.libelle} : pas encore assez de données (${e.n1} soir(s) concerné(s), ${e.n0} autre(s) ; " +
-            "il en faut ${Labo.MIN_GROUPE} de chaque, avec une pesée le matin et le lendemain)."
-    } else buildString {
-        append("${e.libelle} : poids du lendemain ${signe(j1.estimation, 1, "kg")} par rapport aux autres soirs ")
-        append("(${ic(j1, 1, "kg")} ; ${e.n1} soirs contre ${e.n0}).")
-        if (j1.contientZero) append(" Pas d'écart net visible pour l'instant.")
-        if (e.j2 != null && e.j3 != null) {
-            append(" À J+2 : ${signe(e.j2, 1, "kg")}, à J+3 : ${signe(e.j3, 1, "kg")}.")
-        }
+    val detail = if (j1 == null) {
+        "Pas encore assez de données : ${e.n1} soir(s) concerné(s), ${e.n0} autre(s) " +
+            "(${Labo.MIN_GROUPE} de chaque, avec une pesée le matin et le lendemain)."
+    } else {
+        "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} soirs contre ${e.n0}" +
+            if (j1.contientZero) " · pas d'écart net" else ""
     }
-    Ligne(texte)
+    return ItemForest(e.libelle, j1, detail)
 }
 
-@Composable
-private fun LigneEffetSemaine(e: EffetSemaine) {
+private fun itemSemaine(e: EffetSemaine): ItemForest {
     val effet = e.effet
-    val texte = if (effet == null) {
-        "${e.libelle} : ${e.nbSemaines} semaine(s) exploitable(s) sur ${Labo.MIN_SEMAINES} nécessaires."
-    } else buildString {
-        append("${e.libelle} : apports estimés ${signe(effet.estimation, 0, "kcal/j")} ${e.parQuoi} ")
-        append("(${ic(effet, 0, "kcal/j")} ; ${e.nbSemaines} semaines).")
-        if (effet.contientZero) append(" Pas d'effet net visible pour l'instant.")
+    val detail = if (effet == null) {
+        "${e.nbSemaines} semaine(s) exploitable(s) sur ${Labo.MIN_SEMAINES} nécessaires."
+    } else {
+        "${signe(effet.estimation, 0, "kcal/j")} ${e.parQuoi} (${ic(effet, 0, "kcal/j")}) · ${e.nbSemaines} semaines" +
+            if (effet.contientZero) " · pas d'effet net" else ""
     }
-    Ligne(texte)
+    return ItemForest(e.libelle, effet, detail)
 }
 
-@Composable
-private fun LigneCroise(e: EffetCroise) {
+private fun itemCroise(e: EffetCroise): ItemForest {
     val ecart = e.ecart
-    val texte = if (ecart == null || e.p1 == null || e.p0 == null) {
-        "${e.exposition} — ${e.issue} : pas encore assez de données (${e.n1} jour(s) concerné(s), ${e.n0} autre(s))."
-    } else buildString {
-        append("${e.exposition} : ${e.issue} ${pourcent(e.p1)} des soirs, contre ${pourcent(e.p0)} ${e.reference} ")
-        append("(écart ${signe(ecart.estimation * 100, 0, "points")}, ${ic(ecart.fois(100.0), 0, "points")}).")
-        if (ecart.contientZero) append(" Pas d'écart net visible pour l'instant.")
+    val libelle = "${e.exposition} : ${e.issue}"
+    if (ecart == null || e.p1 == null || e.p0 == null) {
+        return ItemForest(
+            libelle, null,
+            "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s) (${Labo.MIN_GROUPE} de chaque).",
+        )
     }
-    Ligne(texte)
+    val enPoints = ecart.fois(100.0)
+    val detail = "${pourcent(e.p1)} des soirs contre ${pourcent(e.p0)} ${e.reference} " +
+        "(${ic(enPoints, 0, "pts")})" + if (ecart.contientZero) " · pas d'écart net" else ""
+    return ItemForest(libelle, enPoints, detail)
 }
 
 @Composable
