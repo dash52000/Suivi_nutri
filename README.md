@@ -51,4 +51,5 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
   forest plots des effets, décroissance J+1 à J+3)
 - **v0.7** : question « pris ton temps », analyse hebdo alignée, option « masquer la pesée du jour »
 - **v0.8** : section Midi (6 questions), questionnaire par moment de la journée, réflexes et effets croisés du midi dans le labo
-- **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL)
+- **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
+  plus belle et plus pratique
