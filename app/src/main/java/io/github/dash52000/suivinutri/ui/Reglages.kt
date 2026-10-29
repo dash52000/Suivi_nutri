@@ -43,6 +43,7 @@ import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Moment
 import io.github.dash52000.suivinutri.data.QuestionPerso
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.TypePerso
@@ -55,6 +56,7 @@ private val libellesConditions = listOf(
     Condition.SEANCE to "Jours de séance",
     Condition.SEANCE_MIDI to "Séance le midi",
     Condition.BEAUX_PARENTS to "Soirs chez les beaux-parents",
+    Condition.MIDI_PAS_EXTERIEUR to "Midi pas à l'extérieur",
 )
 
 @Composable
@@ -205,7 +207,7 @@ private fun SectionQuestions(config: Configuration) {
         )
         Questionnaire.questions.forEach { q ->
             LigneQuestion(
-                libelle = q.libelle + if (q.ressenti) " (ressenti)" else "",
+                libelle = "${q.moment.libelle} · ${q.libelle}" + if (q.ressenti) " (ressenti)" else "",
                 active = q.id !in enPause,
                 verrouillee = q.id == Questionnaire.ID_DINER,
                 onBasculer = { basculer(q.id, it) },
@@ -222,7 +224,7 @@ private fun SectionQuestions(config: Configuration) {
         }
         perso.forEach { q ->
             LigneQuestion(
-                libelle = q.libelle,
+                libelle = "${q.moment.libelle} · ${q.libelle}",
                 active = q.id !in enPause,
                 verrouillee = false,
                 onBasculer = { basculer(q.id, it) },
@@ -231,8 +233,8 @@ private fun SectionQuestions(config: Configuration) {
         }
         if (formulaireOuvert) {
             FormulaireQuestion(
-                onAjouter = { libelle, type, tenuSi, condition ->
-                    config.ajouter(libelle, type, tenuSi, condition)
+                onAjouter = { libelle, type, tenuSi, condition, moment ->
+                    config.ajouter(libelle, type, tenuSi, condition, moment)
                     perso = config.perso()
                     formulaireOuvert = false
                 },
@@ -286,13 +288,14 @@ private fun LigneQuestion(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FormulaireQuestion(
-    onAjouter: (String, TypePerso, String, Condition) -> Unit,
+    onAjouter: (String, TypePerso, String, Condition, Moment) -> Unit,
     onAnnuler: () -> Unit,
 ) {
     var libelle by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(TypePerso.OUI_NON) }
     var tenuSi by remember { mutableStateOf("oui") }
     var condition by remember { mutableStateOf(Condition.TOUJOURS) }
+    var moment by remember { mutableStateOf(Moment.SOIR) }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -315,6 +318,12 @@ private fun FormulaireQuestion(
                 FilterChip(selected = tenuSi == "oui", onClick = { tenuSi = "oui" }, label = { Text("Oui") })
                 FilterChip(selected = tenuSi == "non", onClick = { tenuSi = "non" }, label = { Text("Non") })
             }
+            Text("Moment de la journée", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Moment.entries.forEach { m ->
+                    FilterChip(selected = m == moment, onClick = { moment = m }, label = { Text(m.libelle) })
+                }
+            }
             Text("Quand la poser", style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 libellesConditions.forEach { (c, l) ->
@@ -324,7 +333,7 @@ private fun FormulaireQuestion(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     enabled = libelle.isNotBlank(),
-                    onClick = { onAjouter(libelle, type, tenuSi, condition) },
+                    onClick = { onAjouter(libelle, type, tenuSi, condition, moment) },
                 ) { Text("Ajouter") }
                 TextButton(onClick = onAnnuler) { Text("Annuler") }
             }

@@ -13,6 +13,8 @@ data class JourLabo(
     val kcal: Double? = null,
     val sommeilMin: Long? = null,
     val entree: EntreeJour? = null,
+    /** Séance démarrée entre 10 h et 14 h 59 ; null si Health Connect n'a rien pour ce jour. */
+    val seanceMidi: Boolean? = null,
 )
 
 data class PointPoids(val date: LocalDate, val brut: Double?, val tendance: Double)
@@ -98,25 +100,32 @@ object Labo {
 
     private fun EntreeJour.rep(id: String): String? = reponses[id]
 
-    /** Score de chaque réflexe un soir donné : 1 = tenu, 0 = pas tenu, null = sans objet ou sans réponse. */
+    private val SCORE_TEMPS = mapOf("oui" to 1.0, "a_moitie" to 0.5, "non" to 0.0)
+    private val SCORE_ASSIETTE = mapOf("oui" to 1.0, "en_partie" to 0.5, "non" to 0.0) // « pas possible » : NA
+
+    /**
+     * Score de chaque réflexe un jour donné : 1 = tenu, 0,5 = à moitié, 0 = pas tenu, null = sans objet
+     * ou sans réponse. Dans l'ordre de la journée.
+     */
     val reflexes: List<Pair<String, (EntreeJour) -> Double?>> = listOf(
-        "Boîtes posées" to { e: EntreeJour ->
+        "Midi · lentement" to { e: EntreeJour -> e.rep("midi_temps")?.let { SCORE_TEMPS[it] } },
+        "Midi · sans écran" to { e: EntreeJour ->
+            when (e.rep("midi_ecran")) { "non" -> 1.0; "oui" -> 0.0; else -> null }
+        },
+        "Midi · assiette ½ ¼ ¼" to { e: EntreeJour -> e.rep("midi_assiette")?.let { SCORE_ASSIETTE[it] } },
+        "Soir · boîtes posées" to { e: EntreeJour ->
             when (e.rep("boites")) { "oui" -> 1.0; "non" -> 0.0; else -> null }
         },
-        "Tupp remplis" to { e: EntreeJour ->
-            when (e.rep("tupp")) { "oui" -> 1.0; "non" -> 0.0; else -> null }
-        },
-        "Assiette équilibrée" to { e: EntreeJour ->
-            when (e.rep("assiette")) { "oui" -> 1.0; "en_partie" -> 0.5; "non" -> 0.0; else -> null }
-        },
-        "Pris ton temps" to { e: EntreeJour ->
-            when (e.rep("temps")) { "oui" -> 1.0; "a_moitie" -> 0.5; "non" -> 0.0; else -> null }
-        },
-        "Pas de rab" to { e: EntreeJour ->
+        "Soir · assiette ½ ¼ ¼" to { e: EntreeJour -> e.rep("assiette")?.let { SCORE_ASSIETTE[it] } },
+        "Soir · lentement" to { e: EntreeJour -> e.rep("temps")?.let { SCORE_TEMPS[it] } },
+        "Soir · pas de rab" to { e: EntreeJour ->
             when (e.rep("resservi")) { "non" -> 1.0; "un_peu" -> 0.5; "oui" -> 0.0; else -> null }
         },
-        "Dessert évité ou mis de côté" to { e: EntreeJour ->
+        "Soir · dessert évité ou gardé" to { e: EntreeJour ->
             when (e.rep("dessert")) { "non", "tupp" -> 1.0; "petite" -> 0.5; "normale" -> 0.0; else -> null }
+        },
+        "Soir · tupp remplis" to { e: EntreeJour ->
+            when (e.rep("tupp")) { "oui" -> 1.0; "non" -> 0.0; else -> null }
         },
     )
 
@@ -332,38 +341,58 @@ object Labo {
         return effets + EffetSemaine("Alcool", "par 5 unités de plus par semaine", pointsAlcool.size, effetAlcool)
     }
 
-    /** Nuit courte ou alcool la veille : change-t-il les réflexes du soir ? */
+    /** Une exposition d'un jour et l'issue mesurée le même jour. */
+    private class Croisement(
+        val exposition: String,
+        val reference: String,
+        val issue: String,
+        val expose: (JourLabo) -> Boolean?,
+        val mesure: (JourLabo) -> Boolean?,
+    )
+
+    /** Ce qui se passe avant (nuit, veille, midi) change-t-il ce qui suit (midi, soir) ? */
     private fun croises(tries: List<JourLabo>, parDate: Map<LocalDate, JourLabo>): List<EffetCroise> {
         val nuitCourte: (JourLabo) -> Boolean? = { j -> j.sommeilMin?.let { it < NUIT_COURTE_MIN } }
         val alcoolVeille: (JourLabo) -> Boolean? = { j -> alcool(parDate[j.date.minusDays(1)]?.entree) }
-        val expositions: List<Triple<String, String, (JourLabo) -> Boolean?>> = listOf(
-            Triple("Après une nuit de moins de 6 h 30", "après une nuit plus longue", nuitCourte),
-            Triple("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", alcoolVeille),
+        val tuppVeille: (JourLabo) -> Boolean? = { j ->
+            when (parDate[j.date.minusDays(1)]?.entree?.rep("tupp")) { "oui" -> true; "non" -> false; else -> null }
+        }
+        val creux: (JourLabo) -> Boolean? = { j ->
+            when (j.entree?.rep("midi_creux")) { "oui" -> true; "non" -> false; else -> null }
+        }
+        val tuppMidi: (JourLabo) -> Boolean? = { j ->
+            when (j.entree?.rep("midi_quoi")) { "tupp" -> true; "prepare", "achete" -> false; else -> null }
+        }
+        val rabSoir: (JourLabo) -> Boolean? = { j -> rab(j.entree) }
+        val dessertSoir: (JourLabo) -> Boolean? = { j -> dessertPris(j.entree) }
+
+        val croisements = listOf(
+            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir),
+            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "dessert pris", nuitCourte, dessertSoir),
+            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "rab le soir", alcoolVeille, rabSoir),
+            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "dessert pris", alcoolVeille, dessertSoir),
+            Croisement("Tupp remplis la veille", "quand ils ne l'ont pas été", "tupp mangé le midi", tuppVeille, tuppMidi),
+            Croisement("Les jours de séance le midi", "les autres jours", "petit creux l'après-midi", { j -> j.seanceMidi }, creux),
+            Croisement("Après un petit creux l'après-midi", "sans creux", "rab le soir", creux, rabSoir),
         )
-        val issues: List<Pair<String, (EntreeJour?) -> Boolean?>> = listOf(
-            "rab" to { e: EntreeJour? -> rab(e) },
-            "dessert pris" to { e: EntreeJour? -> dessertPris(e) },
-        )
-        return expositions.flatMap { (exposition, reference, expose) ->
-            issues.map { (issue, mesure) ->
-                var s1 = 0; var n1 = 0; var s0 = 0; var n0 = 0
-                tries.forEach { j ->
-                    val e = expose(j) ?: return@forEach
-                    val r = mesure(j.entree) ?: return@forEach
-                    if (e) { n1++; if (r) s1++ } else { n0++; if (r) s0++ }
-                }
-                val assez = n1 >= MIN_GROUPE && n0 >= MIN_GROUPE
-                EffetCroise(
-                    exposition = exposition,
-                    reference = reference,
-                    issue = issue,
-                    n1 = n1,
-                    n0 = n0,
-                    p1 = if (n1 > 0) s1.toDouble() / n1 else null,
-                    p0 = if (n0 > 0) s0.toDouble() / n0 else null,
-                    ecart = if (assez) Stats.differenceProportions(s1, n1, s0, n0) else null,
-                )
+        return croisements.map { c ->
+            var s1 = 0; var n1 = 0; var s0 = 0; var n0 = 0
+            tries.forEach { j ->
+                val e = c.expose(j) ?: return@forEach
+                val r = c.mesure(j) ?: return@forEach
+                if (e) { n1++; if (r) s1++ } else { n0++; if (r) s0++ }
             }
+            val assez = n1 >= MIN_GROUPE && n0 >= MIN_GROUPE
+            EffetCroise(
+                exposition = c.exposition,
+                reference = c.reference,
+                issue = c.issue,
+                n1 = n1,
+                n0 = n0,
+                p1 = if (n1 > 0) s1.toDouble() / n1 else null,
+                p0 = if (n0 > 0) s0.toDouble() / n0 else null,
+                ecart = if (assez) Stats.differenceProportions(s1, n1, s0, n0) else null,
+            )
         }
     }
 

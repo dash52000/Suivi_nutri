@@ -17,8 +17,9 @@ data class QuestionPerso(
     val type: TypePerso,
     val tenuSi: String,
     val condition: Condition,
+    val moment: Moment = Moment.SOIR,
 ) {
-    fun versQuestion(): Question = Question(id, libelle, type.options, condition)
+    fun versQuestion(): Question = Question(id, libelle, type.options, condition, moment)
 
     /** 1 = réflexe tenu, 0,5 = « un peu », 0 = pas tenu, null = pas de réponse. */
     fun score(code: String?): Double? = when (code) {
@@ -45,13 +46,19 @@ class Configuration(context: Context) {
 
     fun perso(): List<QuestionPerso> = persoDepuisJson(JSONArray(prefs.getString("perso", "[]")))
 
-    fun ajouter(libelle: String, type: TypePerso, tenuSi: String, condition: Condition): QuestionPerso {
+    fun ajouter(
+        libelle: String,
+        type: TypePerso,
+        tenuSi: String,
+        condition: Condition,
+        moment: Moment = Moment.SOIR,
+    ): QuestionPerso {
         val existants = perso()
         val base = "perso_" + slug(libelle).ifEmpty { "question" }
         var id = base
         var n = 2
         while (existants.any { it.id == id } || Questionnaire.questions.any { it.id == id }) id = base + "_" + n++
-        val q = QuestionPerso(id, libelle.trim(), type, tenuSi, condition)
+        val q = QuestionPerso(id, libelle.trim(), type, tenuSi, condition, moment)
         enregistrerPerso(existants + q)
         return q
     }
@@ -107,6 +114,7 @@ class Configuration(context: Context) {
                     .put("type", q.type.name)
                     .put("tenu_si", q.tenuSi)
                     .put("condition", q.condition.name)
+                    .put("moment", q.moment.name)
             )
         }
         return tableau
@@ -122,6 +130,7 @@ class Configuration(context: Context) {
                     type = TypePerso.valueOf(o.getString("type")),
                     tenuSi = o.getString("tenu_si"),
                     condition = Condition.valueOf(o.getString("condition")),
+                    moment = Moment.valueOf(o.optString("moment", Moment.SOIR.name)),
                 )
             }.getOrNull()
         }

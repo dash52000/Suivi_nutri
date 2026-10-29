@@ -106,7 +106,14 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
             val entrees = journal.toutes()
             val jours = (sante.keys + entrees.keys).map { d ->
                 val s = sante[d]
-                JourLabo(d, s?.poidsKg, s?.kcalTotal, s?.sommeilMin, entrees[d])
+                JourLabo(
+                    date = d,
+                    poids = s?.poidsKg,
+                    kcal = s?.kcalTotal,
+                    sommeilMin = s?.sommeilMin,
+                    entree = entrees[d],
+                    seanceMidi = s?.activites?.any { it.debut.hour in 10..14 },
+                )
             }
             val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
             val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
@@ -278,7 +285,7 @@ private fun itemCroise(e: EffetCroise): ItemForest {
         )
     }
     val enPoints = ecart.fois(100.0)
-    val detail = "${pourcent(e.p1)} des soirs contre ${pourcent(e.p0)} ${e.reference} " +
+    val detail = "${pourcent(e.p1)} des jours contre ${pourcent(e.p0)} ${e.reference} " +
         "(${ic(enPoints, 0, "pts")})" + if (ecart.contientZero) " · pas d'écart net" else ""
     return ItemForest(libelle, enPoints, detail)
 }

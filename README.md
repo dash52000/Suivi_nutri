@@ -33,6 +33,8 @@ jour qui s'installe par-dessus l'appli existante.
 - Niveau absolu des apports probablement surestimé (dépense de la montre) :
   seules les variations sont interprétées.
 - Effets croisés : différence de proportions, intervalle d'Agresti-Caffo.
+  Croisements : nuit courte et alcool la veille → rab / dessert ; tupp remplis la veille →
+  tupp mangé le midi ; séance le midi → petit creux l'après-midi ; petit creux → rab le soir.
 - Minimum : 5 observations par groupe, 8 semaines pour les régressions.
 
 Les tests unitaires (`app/src/test`) comparent ces calculs à des valeurs de
@@ -48,4 +50,5 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
 - **v0.6** : bilan des 7 derniers jours, graphes du labo (apports/dépense, calendrier des réflexes,
   forest plots des effets, décroissance J+1 à J+3)
 - **v0.7** : question « pris ton temps », analyse hebdo alignée, option « masquer la pesée du jour »
+- **v0.8** : section Midi (6 questions), questionnaire par moment de la journée, réflexes et effets croisés du midi dans le labo
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL)

@@ -21,16 +21,16 @@ class CalendrierTest {
         val lignes = Labo.calendrier(entrees, dates, Labo.reflexes)
 
         // Seuls les réflexes avec au moins une réponse apparaissent.
-        assertEquals(listOf("Tupp remplis", "Assiette équilibrée"), lignes.map { it.libelle })
+        assertEquals(listOf("Soir · assiette ½ ¼ ¼", "Soir · tupp remplis"), lignes.map { it.libelle })
 
-        val tupp = lignes.first { it.libelle == "Tupp remplis" }
+        val tupp = lignes.first { it.libelle == "Soir · tupp remplis" }
         assertEquals(1.0, tupp.scores[0]!!, 0.0)
         assertEquals(0.0, tupp.scores[1]!!, 0.0)
         assertNull(tupp.scores[2])
         assertEquals(2.0, tupp.tenus, 0.0)
         assertEquals(3, tupp.repondus)
 
-        val assiette = lignes.first { it.libelle == "Assiette équilibrée" }
+        val assiette = lignes.first { it.libelle == "Soir · assiette ½ ¼ ¼" }
         assertEquals(0.5, assiette.tenus, 0.0)
         assertEquals(1, assiette.repondus)
     }

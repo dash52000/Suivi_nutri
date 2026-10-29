@@ -39,6 +39,7 @@ import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.data.Moment
 import io.github.dash52000.suivinutri.data.Question
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.StyleBoisson
@@ -67,9 +68,6 @@ private fun fmtDegre(d: Double): String = if (d % 1.0 == 0.0) fmt(d, 0) else fmt
 fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
     // Relu à chaque entrée dans l'onglet : reflète les changements faits dans Réglages.
     val questions = remember { config.questionnaire() }
-    val idsBeauxParents = remember(questions) {
-        questions.filter { it.condition == Condition.BEAUX_PARENTS }.map { it.id }.toSet()
-    }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var entree by remember(date) { mutableStateOf(journal.entree(date)) }
     var seance by remember(date) { mutableStateOf<Boolean?>(null) }
@@ -97,8 +95,9 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
     fun repondre(id: String, code: String) {
         val reponses = entree.reponses.toMutableMap()
         if (reponses[id] == code) reponses.remove(id) else reponses[id] = code
-        if (id == Questionnaire.ID_DINER && reponses[id] != Questionnaire.DINER_BEAUX_PARENTS) {
-            idsBeauxParents.forEach { reponses.remove(it) }
+        // Une question qui devient masquée (ex. « Devant un écran ? » après « Extérieur ») perd sa réponse.
+        questions.forEach { q ->
+            if (Questionnaire.conditionRemplie(q.condition, reponses) == false) reponses.remove(q.id)
         }
         val boissons = if (id == Questionnaire.ID_ALCOOL && reponses[id] != "oui") emptyList() else entree.boissons
         mettreAJour(entree.copy(reponses = reponses, boissons = boissons))
@@ -108,7 +107,8 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
         Condition.TOUJOURS -> true
         Condition.SEANCE -> seance != false
         Condition.SEANCE_MIDI -> seanceMidi != false
-        Condition.BEAUX_PARENTS -> entree.reponses[Questionnaire.ID_DINER] == Questionnaire.DINER_BEAUX_PARENTS
+        Condition.BEAUX_PARENTS, Condition.MIDI_PAS_EXTERIEUR ->
+            Questionnaire.conditionRemplie(q.condition, entree.reponses) == true
     }
 
     Column(
@@ -139,15 +139,26 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        questions.filter { !it.ressenti && visible(it) }.forEach { q ->
-            BlocQuestion(q, entree.reponses[q.id]) { repondre(q.id, it) }
+        // Par moment de la journée ; un moment sans question visible n'a pas de titre.
+        Moment.entries.forEach { moment ->
+            val duMoment = questions.filter { !it.ressenti && it.moment == moment && visible(it) }
+            if (duMoment.isEmpty() && moment != Moment.JOURNEE) return@forEach
+            Text(
+                moment.libelle,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            duMoment.forEach { q ->
+                BlocQuestion(q, entree.reponses[q.id]) { repondre(q.id, it) }
+            }
+            if (moment == Moment.JOURNEE) {
+                BlocAlcool(
+                    entree = entree,
+                    onRepondre = { repondre(Questionnaire.ID_ALCOOL, it) },
+                    onBoissons = { mettreAJour(entree.copy(boissons = it)) },
+                )
+            }
         }
-
-        BlocAlcool(
-            entree = entree,
-            onRepondre = { repondre(Questionnaire.ID_ALCOOL, it) },
-            onBoissons = { mettreAJour(entree.copy(boissons = it)) },
-        )
 
         if (questions.any { it.ressenti }) TextButton(onClick = { ressentisOuverts = !ressentisOuverts }) {
             Text(if (ressentisOuverts) "Masquer les ressentis" else "Ressentis (en option)")
