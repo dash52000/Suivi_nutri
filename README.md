@@ -6,8 +6,10 @@ Info, jamais verdict : une question sans réponse est un NA, pas un échec.
 ## Installer
 
 Chaque push sur `main` construit un APK signé et le publie dans les
-[Releases](../../releases). Sur le téléphone : télécharger le dernier APK et
-l'installer **par-dessus** la version existante, sans désinstaller.
+[Releases](../../releases). Lien toujours à jour, à garder en favori sur le téléphone :
+https://github.com/dash52000/Suivi_nutri/releases/latest/download/suivi-nutri.apk
+
+L'installer **par-dessus** la version existante, sans désinstaller.
 
 ## Signature
 

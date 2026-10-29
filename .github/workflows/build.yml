@@ -79,6 +79,8 @@ jobs:
           BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$BT/apksigner" verify --print-certs "$APK" | grep -i "SHA-256"
           cp "$APK" "suivi-nutri-$VERSION_NAME.apk"
+          # Nom fixe : le lien releases/latest/download/suivi-nutri.apk donne toujours la dernière version.
+          cp "$APK" suivi-nutri.apk
 
       - name: Garder l'APK comme artefact
         if: steps.cle.outputs.presente == 'true'
@@ -93,8 +95,10 @@ jobs:
         with:
           tag_name: v${{ env.VERSION_NAME }}
           name: Suivi nutri ${{ env.VERSION_NAME }}
-          body: APK signé avec la clé fixe. À installer par-dessus la version précédente, sans désinstaller.
-          files: suivi-nutri-${{ env.VERSION_NAME }}.apk
+          body: |
+            Version ${{ env.VERSION_NAME }}, signée avec la clé fixe. À installer par-dessus la version précédente, sans désinstaller.
+            Lien toujours à jour : https://github.com/${{ github.repository }}/releases/latest/download/suivi-nutri.apk
+          files: suivi-nutri.apk
 
       - name: Signaler l'absence de clé
         if: steps.cle.outputs.presente != 'true'
