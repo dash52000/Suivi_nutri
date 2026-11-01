@@ -1,5 +1,6 @@
 package io.github.dash52000.suivinutri.labo
 
+import io.github.dash52000.suivinutri.data.Boisson
 import io.github.dash52000.suivinutri.data.EntreeJour
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -125,6 +126,55 @@ class LaboTest {
         val r = Labo.analyser(jours, debut.plusDays(9))
         assertTrue(r.poids.first { it.date == debut.plusDays(6) }.ecartee)
         assertEquals(80.0, r.poids.last().tendance, 0.01)
+    }
+
+    /** +0,15 kg le lendemain par unité d'alcool ; référence numpy (même pipeline) : 0,139256. */
+    @Test
+    fun alcoolParUnite() {
+        val motif = listOf(0, 0, 2, 0, 1, 0, 3, 0, 0, 1)
+        val n = 60
+        val jours = (0 until n).map { t ->
+            val u = motif[t % 10]
+            val veille = if (t > 0) motif[(t - 1) % 10] else 0
+            val d = debut.plusDays(t.toLong())
+            JourLabo(
+                date = d,
+                poids = 80 + 0.2 * kotlin.math.sin(1.7 * t) + 0.15 * veille,
+                entree = EntreeJour(
+                    d,
+                    mapOf("alcool" to if (u > 0) "oui" else "aucun"),
+                    if (u > 0) listOf(Boisson("pils", 25.0 * u, 5.0)) else emptyList(),
+                ),
+            )
+        }
+        val r = Labo.analyser(jours, debut.plusDays((n - 1).toLong()))
+        val alcool = r.lendemain.first { it.libelle == "Alcool, par unité" }
+        assertEquals(0.139256, alcool.j1!!.estimation, 1e-4)
+        assertEquals(23, alcool.n1)
+        assertEquals(36, alcool.n0)
+    }
+
+    /** Les soirs « pris ton temps » n'ont jamais de rab, les autres toujours : écart de −100 points. */
+    @Test
+    fun mecanismePrisTonTempsContreRab() {
+        val jours = (0L until 20L).map { k ->
+            val lent = k % 2 == 0L
+            JourLabo(
+                date = debut.plusDays(k),
+                entree = EntreeJour(
+                    debut.plusDays(k),
+                    mapOf("temps" to if (lent) "oui" else "non", "resservi" to if (lent) "non" else "oui"),
+                ),
+            )
+        }
+        val r = Labo.analyser(jours, debut.plusDays(19))
+        val effet = r.croises.first { it.mecanisme && it.exposition.contains("pris ton temps") }
+        assertEquals(10, effet.n1)
+        assertEquals(10, effet.n0)
+        assertEquals(0.0, effet.p1!!, 0.0)
+        assertEquals(1.0, effet.p0!!, 0.0)
+        assertEquals(-1.0, effet.ecart!!.estimation, 1e-12)
+        assertEquals(5, r.croises.count { it.mecanisme })
     }
 
     @Test

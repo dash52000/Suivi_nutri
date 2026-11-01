@@ -114,6 +114,8 @@ data class EffetCroise(
     val p0: Double?,
     val ecart: Intervalle?,
     val q: Double? = null,
+    /** Test direct du mécanisme d'un réflexe, le jour même (ex. pris ton temps → rab). */
+    val mecanisme: Boolean = false,
 )
 
 data class Qualite(
@@ -421,12 +423,19 @@ object Labo {
         parDate: Map<LocalDate, JourLabo>,
         lis: Kalman.Lissage?,
     ): List<EffetLendemain> {
-        val expositions: List<Pair<String, (JourLabo) -> Boolean?>> = listOf(
-            "Soir avec rab" to { j: JourLabo -> rab(j.entree) },
-            "Dessert pris" to { j: JourLabo -> dessertPris(j.entree) },
-            "Soir avec alcool" to { j: JourLabo -> alcool(j.entree) },
-            "Dîner chez les beaux-parents" to { j: JourLabo -> beauxParents(j.entree) },
-            "Longue sortie (1 h 15 et plus)" to { j: JourLabo -> j.longueSortie },
+        // Expositions graduées : rab et dessert sur 3 niveaux (« un peu », « petite part » = moitié),
+        // alcool en unités ; le coefficient est l'effet d'un oui franc, ou d'une unité d'alcool.
+        fun binaire(b: Boolean?): Double? = b?.let { if (it) 1.0 else 0.0 }
+        val expositions: List<Pair<String, (JourLabo) -> Double?>> = listOf(
+            "Soir avec rab" to { j: JourLabo ->
+                when (j.entree?.rep("resservi")) { "oui" -> 1.0; "un_peu" -> 0.5; "non" -> 0.0; else -> null }
+            },
+            "Dessert pris" to { j: JourLabo ->
+                when (j.entree?.rep("dessert")) { "normale" -> 1.0; "petite" -> 0.5; "non", "tupp" -> 0.0; else -> null }
+            },
+            "Alcool, par unité" to { j: JourLabo -> unites(j.entree) },
+            "Dîner chez les beaux-parents" to { j: JourLabo -> binaire(beauxParents(j.entree)) },
+            "Longue sortie (1 h 15 et plus)" to { j: JourLabo -> binaire(j.longueSortie) },
         )
         if (lis == null) return expositions.map { (l, _) -> EffetLendemain(l, 0, 0, null, null, null) }
 
@@ -435,14 +444,16 @@ object Labo {
             return y - lis.niveau(lis.index(d)!!)
         }
 
-        class Ligne(val position: Int, val residu: Double, val x: List<Boolean?>)
+        class Ligne(val position: Int, val residu: Double, val x: List<Double?>)
 
         fun lignes(k: Long): List<Ligne> = tries.mapNotNull { j ->
             val e = residu(j.date.plusDays(k)) ?: return@mapNotNull null
             Ligne(j.date.toEpochDay().toInt(), e, expositions.map { (_, f) -> f(j) })
         }
 
-        fun compte(l: List<Ligne>, v: Int) = l.count { it.x[v] == true } to l.count { it.x[v] == false }
+        // Jours exposés (valeur > 0) et non exposés (valeur 0).
+        fun compte(l: List<Ligne>, v: Int) =
+            l.count { (it.x[v] ?: 0.0) > 0.0 && it.x[v] != null } to l.count { it.x[v] == 0.0 }
 
         // Sélection des expositions sur J+1, jusqu'à stabilité (les jours complets dépendent de la sélection).
         val l1 = lignes(1)
@@ -465,7 +476,7 @@ object Labo {
             val c = lignes.filter { ligne -> retenues.all { ligne.x[it] != null } }
             if (retenues.isEmpty() || c.size < MIN_JOURS_REGRESSION || c.size - retenues.size - 1 < 5) return null
             return Stats.olsHac(
-                c.map { ligne -> DoubleArray(retenues.size + 1) { a -> if (a == 0) 1.0 else if (ligne.x[retenues[a - 1]] == true) 1.0 else 0.0 } },
+                c.map { ligne -> DoubleArray(retenues.size + 1) { a -> if (a == 0) 1.0 else ligne.x[retenues[a - 1]]!! } },
                 c.map { it.residu },
                 c.map { it.position },
                 RETARD_JOURS,
@@ -530,6 +541,7 @@ object Labo {
         val issue: String,
         val expose: (JourLabo) -> Boolean?,
         val mesure: (JourLabo) -> Boolean?,
+        val mecanisme: Boolean = false,
     )
 
     /** Ce qui se passe avant (nuit, veille, midi) change-t-il ce qui suit (midi, soir) ? */
@@ -547,8 +559,20 @@ object Labo {
         }
         val rabSoir: (JourLabo) -> Boolean? = { j -> rab(j.entree) }
         val dessertSoir: (JourLabo) -> Boolean? = { j -> dessertPris(j.entree) }
+        fun ouiNon(id: String): (JourLabo) -> Boolean? = { j ->
+            when (j.entree?.rep(id)) { "oui" -> true; "non" -> false; else -> null }
+        }
+        // « À moitié » et « pas fait gaffe » sont exclus : on compare des soirs francs.
+        val pasDeRab: (JourLabo) -> Boolean? = { j -> rab(j.entree)?.not() }
 
         val croisements = listOf(
+            // Mécanismes : chaque réflexe fait-il, le soir même, ce pour quoi il a été conçu ?
+            Croisement("Soirs où tu as pris ton temps", "les soirs mangés vite", "rab le soir", ouiNon("temps"), rabSoir, true),
+            Croisement("Soirs avec les boîtes posées", "sans les boîtes", "rab le soir", ouiNon("boites"), rabSoir, true),
+            Croisement("Soirs où le plaisir a baissé", "quand il n'a pas baissé", "rab le soir", ouiNon("plaisir_baisse"), rabSoir, true),
+            Croisement("Jours avec collation", "sans collation", "fringale en séance", ouiNon("collation"), ouiNon("fringale"), true),
+            Croisement("Soirs sans rab", "les soirs avec rab", "faim au coucher", pasDeRab, ouiNon("faim_coucher"), true),
+
             Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir),
             Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "dessert pris", nuitCourte, dessertSoir),
             Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "rab le soir", alcoolVeille, rabSoir),
@@ -574,6 +598,7 @@ object Labo {
                 p1 = if (n1 > 0) s1.toDouble() / n1 else null,
                 p0 = if (n0 > 0) s0.toDouble() / n0 else null,
                 ecart = if (assez) Stats.differenceProportions(s1, n1, s0, n0) else null,
+                mecanisme = c.mecanisme,
             )
         }
     }

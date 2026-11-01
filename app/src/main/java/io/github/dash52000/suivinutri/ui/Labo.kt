@@ -179,6 +179,23 @@ private fun Ligne(texte: String) {
 private fun ContenuLabo(etat: EtatLabo.Pret) {
     val r = etat.resultat
 
+    Section("Tes réflexes, 4 dernières semaines", null) {
+        if (etat.calendrier.isEmpty()) {
+            Ligne("Le calendrier se remplira avec tes réponses du soir.")
+        } else {
+            CalendrierLong(etat.calendrier, etat.dates28)
+        }
+    }
+
+    Section(
+        "Tes réflexes font-ils leur effet ?",
+        "Chaque réflexe testé sur ce pour quoi il a été pensé, le jour même : fréquence du rab, de la fringale " +
+            "ou de la faim au coucher selon que le réflexe a été tenu ou non (écart en points de pourcentage). " +
+            "Pas de bruit de pesée ici : c'est le premier endroit où des résultats apparaîtront.",
+    ) {
+        ForestPlot(r.croises.filter { it.mecanisme }.map { itemCroise(it) }, "pts", 0)
+    }
+
     val masquerPesee = Affichage.masquerPesee(LocalContext.current)
     Section(
         "Poids",
@@ -227,18 +244,11 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         }
     }
 
-    Section("Tes réflexes, 4 dernières semaines", null) {
-        if (etat.calendrier.isEmpty()) {
-            Ligne("Le calendrier se remplira avec tes réponses du soir.")
-        } else {
-            CalendrierLong(etat.calendrier, etat.dates28)
-        }
-    }
-
     Section(
         "Le lendemain",
         "Écart de la pesée à la tendance, expliqué par toutes les expositions de la veille à la fois : chaque " +
-            "effet est estimé à expositions égales par ailleurs. Le poids du lendemain bouge surtout avec l'eau, " +
+            "effet est estimé à expositions égales par ailleurs. Rab et dessert : effet d'un oui franc (« un peu » " +
+            "et « petite part » comptent pour moitié) ; alcool : effet par unité. Le poids du lendemain bouge surtout avec l'eau, " +
             "le sel et le glycogène ; ce qui compte, c'est que l'écart retombe en 2 ou 3 jours.",
     ) {
         ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
@@ -254,7 +264,7 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
     }
 
     Section("Effets croisés", "Écart de fréquence, en points de pourcentage.") {
-        ForestPlot(r.croises.map { itemCroise(it) }, "pts", 0)
+        ForestPlot(r.croises.filter { !it.mecanisme }.map { itemCroise(it) }, "pts", 0)
     }
 
     Text(

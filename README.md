@@ -40,9 +40,12 @@ jour qui s'installe par-dessus l'appli existante.
   avec IC 95 % tiré de la covariance a posteriori des deux niveaux (covariance croisée du lisseur).
   Semaine complète : ≥ 3 pesées retenues et ≥ 5 jours de dépense. Semaine en cours dès 2 jours écoulés.
   Niveau absolu probablement surestimé (dépense de la montre) : seules les variations comptent.
+- **Mécanismes des réflexes** (le jour même, sans bruit de pesée) : pris ton temps → rab, boîtes
+  posées → rab, plaisir baissé → rab, collation → fringale en séance, pas de rab → faim au coucher ;
+  différence de proportions (Agresti-Caffo), soirs francs seulement (« à moitié » exclu).
 - **Lendemain** : régression jointe de l'écart pesée − tendance à J+1 (J+2, J+3 pour la décroissance)
-  sur toutes les expositions du soir J à la fois : rab, dessert, alcool, beaux-parents, longue sortie
-  (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
+  sur toutes les expositions du soir J à la fois : rab et dessert sur 3 niveaux (0 ; 0,5 ; 1), alcool
+  en unités, beaux-parents, longue sortie (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
   les jours complets ; ≥ 15 jours complets. Erreurs-types de Newey-West (retard 2 jours, jours voisins seulement).
 - **Plusieurs semaines** : pente de régression des apports estimés sur le taux de chaque réflexe,
   un réflexe à la fois, Newey-West (retard 1 semaine). Au moins 8 semaines.
