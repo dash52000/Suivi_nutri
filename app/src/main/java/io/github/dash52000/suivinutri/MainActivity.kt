@@ -151,7 +151,7 @@ fun App(health: HealthData, journal: Journal, config: Configuration) {
             Onglet.SOIR -> EcranSoir(journal, config, health, m)
             Onglet.DONNEES -> EcranDonnees(health, m)
             Onglet.LABO -> EcranLabo(health, journal, config, m)
-            Onglet.REGLAGES -> EcranReglages(journal, config, m)
+            Onglet.REGLAGES -> EcranReglages(journal, config, health, m)
         }
     }
 }

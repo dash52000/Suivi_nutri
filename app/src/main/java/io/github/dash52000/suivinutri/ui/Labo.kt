@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -37,10 +38,11 @@ import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.EffetSemaine
-import io.github.dash52000.suivinutri.labo.JourLabo
 import io.github.dash52000.suivinutri.labo.Labo
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
+import io.github.dash52000.suivinutri.labo.Stats
+import io.github.dash52000.suivinutri.labo.collecterJours
 import io.github.dash52000.suivinutri.labo.Qualite
 import io.github.dash52000.suivinutri.labo.ResultatLabo
 import kotlinx.coroutines.Dispatchers
@@ -106,19 +108,8 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
         etat = EtatLabo.Chargement
         etat = try {
             val aujourdHui = LocalDate.now()
-            val sante = health.journees(aujourdHui.minusDays(364), aujourdHui).associateBy { it.date }
+            val jours = collecterJours(health, journal, aujourdHui)
             val entrees = journal.toutes()
-            val jours = (sante.keys + entrees.keys).map { d ->
-                val s = sante[d]
-                JourLabo(
-                    date = d,
-                    poids = s?.poidsKg,
-                    kcal = s?.kcalTotal,
-                    sommeilMin = s?.sommeilMin,
-                    entree = entrees[d],
-                    seanceMidi = s?.activites?.any { it.debut.hour in 10..14 },
-                )
-            }
             val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
             val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
             val pret = withContext(Dispatchers.Default) {
@@ -191,30 +182,32 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
     val masquerPesee = Affichage.masquerPesee(LocalContext.current)
     Section(
         "Poids",
-        if (masquerPesee) "La tendance lissée, sans les pesées du jour."
-        else "Des points pour les pesées, un trait pour la tendance lissée : c'est elle qui compte.",
+        (if (masquerPesee) "La tendance, sans les pesées du jour. "
+        else "Des points pour les pesées (vides : écartées), un trait pour la tendance. ") +
+            "La bande donne son incertitude à 95 % : elle s'élargit quand tu ne te pèses pas.",
     ) {
         GraphePoids(r.poids, masquerPesee)
     }
 
     Section(
         "Apports estimés",
-        "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg. Le niveau absolu est sans doute " +
-            "surestimé, car les montres surestiment souvent la dépense : fie-toi aux variations d'une semaine " +
-            "à l'autre, pas au chiffre brut.",
+        "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg, avec un intervalle à 95 % lié aux " +
+            "pesées. Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
+            "fie-toi aux variations d'une semaine à l'autre, pas au chiffre brut.",
     ) {
-        if (r.semaines.size < 2) {
+        if (r.semaines.isEmpty()) {
             Ligne(
-                "Pas encore assez de semaines exploitables : il faut des semaines complètes avec au moins 3 pesées " +
-                    "et 5 jours de dépense, après une dizaine de jours de pesées."
+                "Pas encore de semaine exploitable : il faut au moins 3 pesées et 5 jours de dépense dans la " +
+                    "semaine (pour la semaine en cours, 2 jours écoulés et une pesée suffisent)."
             )
         } else {
             GrapheSemaines(r.semaines)
             val derniere = r.semaines.first()
             Text(
-                "Semaine du ${derniere.lundi.format(formatCourt)} : apports ≈ " +
-                    "${nombre(Math.round(derniere.apportsEstimes / 50.0) * 50.0, 0)} kcal/j pour une dépense de " +
-                    "${nombre(derniere.depenseMoyenne, 0)} (tendance ${signe(derniere.deltaTendanceKg, 2, "kg")}).",
+                (if (derniere.enCours) "Semaine en cours (${derniere.nbJours} jours) : " else "Semaine du ${derniere.lundi.format(formatCourt)} : ") +
+                    "apports ≈ ${nombre(Math.round(derniere.apportsEstimes / 50.0) * 50.0, 0)} kcal/j " +
+                    "(${ic(derniere.apports, 0, "kcal/j").replace("+", "")}) pour une dépense de " +
+                    "${nombre(derniere.depenseMoyenne, 0)}.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -230,8 +223,9 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
 
     Section(
         "Le lendemain",
-        "Le poids du lendemain bouge surtout avec l'eau, le sel et le glycogène. " +
-            "Ce qui compte, c'est que l'écart retombe en 2 ou 3 jours.",
+        "Écart de la pesée à la tendance, expliqué par toutes les expositions de la veille à la fois : chaque " +
+            "effet est estimé à expositions égales par ailleurs. Le poids du lendemain bouge surtout avec l'eau, " +
+            "le sel et le glycogène ; ce qui compte, c'est que l'écart retombe en 2 ou 3 jours.",
     ) {
         ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
         GrapheDecroissance(r.lendemain)
@@ -239,10 +233,8 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
 
     Section(
         "Sur plusieurs semaines",
-        "Effet sur les apports, un réflexe à la fois. Pour rester aligné sur la semaine des réflexes, l'analyse " +
-            "utilise les pesées moyennes des semaines voisines plutôt que la courbe lissée, qui a environ " +
-            "9 jours de retard. Corrélation, pas causalité : une semaine chargée peut à la fois faire sauter " +
-            "des réflexes et changer tes apports.",
+        "Effet sur les apports estimés, un réflexe à la fois. Corrélation, pas causalité : une semaine " +
+            "chargée peut à la fois faire sauter des réflexes et changer tes apports.",
     ) {
         ForestPlot(r.effetsSemaine.map { itemSemaine(it) }, "kcal/j", 0)
     }
@@ -251,21 +243,35 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         ForestPlot(r.croises.map { itemCroise(it) }, "pts", 0)
     }
 
+    Text(
+        "En couleur : les effets qui résistent à la correction pour tests multiples (Benjamini-Hochberg, " +
+            "q < 5 %). Sur une vingtaine d'intervalles à 95 %, environ un exclurait zéro par pur hasard.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
     Section("Qualité des données", null) {
         LigneQualite(r.qualite)
     }
 }
 
+private fun net(q: Double?): Boolean = q != null && q < Labo.SEUIL_Q
+
+private fun verdict(q: Double?): String = when {
+    q == null -> ""
+    net(q) -> " · retenu (q = ${nombre(q, 3)})"
+    else -> " · pas d'effet net (q = ${nombre(q, 2)})"
+}
+
 private fun itemLendemain(e: EffetLendemain): ItemForest {
     val j1 = e.j1
     val detail = if (j1 == null) {
-        "Pas encore assez de données : ${e.n1} soir(s) concerné(s), ${e.n0} autre(s) " +
-            "(${Labo.MIN_GROUPE} de chaque, avec une pesée le matin et le lendemain)."
+        "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s), avec une pesée le lendemain " +
+            "(il en faut ${Labo.MIN_GROUPE} de chaque et ${Labo.MIN_JOURS_REGRESSION} jours complets)."
     } else {
-        "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} soirs contre ${e.n0}" +
-            if (j1.contientZero) " · pas d'écart net" else ""
+        "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} jours contre ${e.n0}" + verdict(e.q)
     }
-    return ItemForest(e.libelle, j1, detail)
+    return ItemForest(e.libelle, j1, detail, net(e.q))
 }
 
 private fun itemSemaine(e: EffetSemaine): ItemForest {
@@ -274,9 +280,9 @@ private fun itemSemaine(e: EffetSemaine): ItemForest {
         "${e.nbSemaines} semaine(s) exploitable(s) sur ${Labo.MIN_SEMAINES} nécessaires."
     } else {
         "${signe(effet.estimation, 0, "kcal/j")} ${e.parQuoi} (${ic(effet, 0, "kcal/j")}) · ${e.nbSemaines} semaines" +
-            if (effet.contientZero) " · pas d'effet net" else ""
+            verdict(e.q)
     }
-    return ItemForest(e.libelle, effet, detail)
+    return ItemForest(e.libelle, effet, detail, net(e.q))
 }
 
 private fun itemCroise(e: EffetCroise): ItemForest {
@@ -286,12 +292,13 @@ private fun itemCroise(e: EffetCroise): ItemForest {
         return ItemForest(
             libelle, null,
             "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s) (${Labo.MIN_GROUPE} de chaque).",
+            false,
         )
     }
     val enPoints = ecart.fois(100.0)
     val detail = "${pourcent(e.p1)} des jours contre ${pourcent(e.p0)} ${e.reference} " +
-        "(${ic(enPoints, 0, "pts")})" + if (ecart.contientZero) " · pas d'écart net" else ""
-    return ItemForest(libelle, enPoints, detail)
+        "(${ic(enPoints, 0, "pts")})" + verdict(e.q)
+    return ItemForest(libelle, enPoints, detail, net(e.q))
 }
 
 @Composable
@@ -319,21 +326,24 @@ private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
         Ligne("Pas encore assez de pesées pour tracer la courbe.")
         return
     }
-    val valeurs = points.flatMap { if (masquerPesee) listOf(it.tendance) else listOfNotNull(it.brut, it.tendance) }
-    val min = valeurs.min() - 0.3
-    val max = valeurs.max() + 0.3
+    // L'échelle suit la tendance et les pesées ; la bande est coupée aux bords si elle déborde.
+    val valeurs = points.flatMap {
+        if (masquerPesee) listOf(it.tendance) else listOfNotNull(if (it.ecartee) null else it.brut, it.tendance)
+    }
+    val min = valeurs.min() - 0.5
+    val max = valeurs.max() + 0.5
     val debut = points.first().date
     val fin = points.last().date
     val etendue = maxOf(1L, ChronoUnit.DAYS.between(debut, fin)).toFloat()
     val couleurTendance = MaterialTheme.colorScheme.primary
-    val couleurPesees = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+    val couleurPesees = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("${nombre(max, 1)} kg", style = MaterialTheme.typography.labelSmall)
                 Text(
-                    "Tendance : ${nombre(points.last().tendance, 1)} kg",
+                    "Tendance : ${nombre(points.last().tendance, 1)} ± ${nombre(Stats.Z975 * points.last().seTendance, 1)} kg",
                     style = MaterialTheme.typography.labelMedium,
                     color = couleurTendance,
                 )
@@ -341,12 +351,29 @@ private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(180.dp),
+                    .height(180.dp)
+                    .clipToBounds(),
             ) {
                 fun x(d: LocalDate) = size.width * ChronoUnit.DAYS.between(debut, d) / etendue
                 fun y(v: Double) = (size.height * (max - v) / (max - min)).toFloat()
+
+                val bande = Path()
+                points.forEachIndexed { i, p ->
+                    val haut = y(p.tendance + Stats.Z975 * p.seTendance)
+                    if (i == 0) bande.moveTo(x(p.date), haut) else bande.lineTo(x(p.date), haut)
+                }
+                points.asReversed().forEach { p -> bande.lineTo(x(p.date), y(p.tendance - Stats.Z975 * p.seTendance)) }
+                bande.close()
+                drawPath(bande, couleurTendance.copy(alpha = 0.15f))
+
                 if (!masquerPesee) points.forEach { p ->
-                    p.brut?.let { drawCircle(couleurPesees, radius = 3.dp.toPx(), center = Offset(x(p.date), y(it))) }
+                    val v = p.brut ?: return@forEach
+                    val centre = Offset(x(p.date), y(v))
+                    if (p.ecartee) {
+                        drawCircle(couleurPesees, radius = 3.5.dp.toPx(), center = centre, style = Stroke(1.5.dp.toPx()))
+                    } else {
+                        drawCircle(couleurPesees.copy(alpha = if (p.apresMidi) 0.25f else 0.5f), radius = 3.dp.toPx(), center = centre)
+                    }
                 }
                 val chemin = Path()
                 points.forEachIndexed { i, p ->

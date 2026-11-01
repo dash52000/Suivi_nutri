@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -67,44 +68,67 @@ private fun Legende(texte: String, couleur: Color) {
 @Composable
 fun GrapheSemaines(semaines: List<SemaineApports>) {
     val serie = semaines.sortedBy { it.lundi }.takeLast(12)
-    if (serie.size < 2) return
+    if (serie.isEmpty()) return
     val p = palette()
-    val valeurs = serie.flatMap { listOf(it.depenseMoyenne, it.apportsEstimes) }
-    val min = valeurs.min() - 150
-    val max = valeurs.max() + 150
+    // Échelle sur les estimations et les intervalles des semaines complètes ; celui de la semaine en cours,
+    // souvent très large en début de semaine, est coupé aux bords.
+    val reference = serie.filter { !it.enCours }.ifEmpty { serie }
+    val valeurs = reference.flatMap { listOf(it.depenseMoyenne, it.apports.bas, it.apports.haut) } +
+        serie.flatMap { listOf(it.depenseMoyenne, it.apportsEstimes) }
+    val min = valeurs.min() - 100
+    val max = valeurs.max() + 100
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Legende("● Apports estimés", p.principale)
+                Legende("● Apports (barre : IC 95 %)", p.principale)
+                Legende("○ En cours", p.principale)
                 Legende("● Dépense", p.attenuee)
             }
             Text("${nombre(max, 0)} kcal/j", style = MaterialTheme.typography.labelSmall)
             Canvas(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp),
+                    .height(170.dp)
+                    .clipToBounds(),
             ) {
-                val pas = size.width / (serie.size - 1)
-                fun x(i: Int) = i * pas
+                val marge = 10.dp.toPx()
+                val pas = if (serie.size > 1) (size.width - 2 * marge) / (serie.size - 1) else 0f
+                fun x(i: Int) = if (serie.size > 1) marge + i * pas else size.width / 2
                 fun y(v: Double) = (size.height * (max - v) / (max - min)).toFloat()
-                fun ligne(valeur: (SemaineApports) -> Double, couleur: Color, epaisseur: Float) {
-                    val chemin = Path()
-                    serie.forEachIndexed { i, s ->
-                        if (i == 0) chemin.moveTo(x(i), y(valeur(s))) else chemin.lineTo(x(i), y(valeur(s)))
-                    }
-                    drawPath(chemin, couleur, style = Stroke(width = epaisseur))
-                    serie.forEachIndexed { i, s -> drawCircle(couleur, 3.5.dp.toPx(), Offset(x(i), y(valeur(s)))) }
+
+                // Dépense : une ligne fine.
+                val chemin = Path()
+                serie.forEachIndexed { i, s ->
+                    if (i == 0) chemin.moveTo(x(i), y(s.depenseMoyenne)) else chemin.lineTo(x(i), y(s.depenseMoyenne))
                 }
-                ligne({ it.depenseMoyenne }, p.attenuee, 1.5.dp.toPx())
-                ligne({ it.apportsEstimes }, p.principale, 2.5.dp.toPx())
+                if (serie.size > 1) drawPath(chemin, p.attenuee, style = Stroke(width = 1.5.dp.toPx()))
+                serie.forEachIndexed { i, s -> drawCircle(p.attenuee, 2.5.dp.toPx(), Offset(x(i), y(s.depenseMoyenne))) }
+
+                // Apports : point + intervalle ; semaine en cours en creux.
+                serie.forEachIndexed { i, s ->
+                    val trait = 2.dp.toPx()
+                    val cx = x(i)
+                    drawLine(p.principale, Offset(cx, y(s.apports.bas)), Offset(cx, y(s.apports.haut)), strokeWidth = trait)
+                    listOf(s.apports.bas, s.apports.haut).forEach { b ->
+                        drawLine(p.principale, Offset(cx - 4.dp.toPx(), y(b)), Offset(cx + 4.dp.toPx(), y(b)), strokeWidth = trait)
+                    }
+                    if (s.enCours) {
+                        drawCircle(p.principale, 5.dp.toPx(), Offset(cx, y(s.apportsEstimes)), style = Stroke(2.dp.toPx()))
+                    } else {
+                        drawCircle(p.principale, 4.5.dp.toPx(), Offset(cx, y(s.apportsEstimes)))
+                    }
+                }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     "${nombre(min, 0)} kcal/j · sem. du ${serie.first().lundi.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
-                Text("sem. du ${serie.last().lundi.format(formatCourt)}", style = MaterialTheme.typography.labelSmall)
+                Text(
+                    if (serie.last().enCours) "en cours" else "sem. du ${serie.last().lundi.format(formatCourt)}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
             }
         }
     }
@@ -214,12 +238,15 @@ fun CalendrierLong(lignes: List<LigneCalendrier>, dates: List<LocalDate>) {
 
 // ---------- Forest plot ----------
 
-/** Une ligne de forest plot : un effet et son intervalle, ou null s'il manque des données. */
-data class ItemForest(val libelle: String, val intervalle: Intervalle?, val detail: String)
+/**
+ * Une ligne de forest plot : un effet et son intervalle, ou null s'il manque des données.
+ * [net] : l'effet résiste à la correction pour tests multiples (affiché en couleur).
+ */
+data class ItemForest(val libelle: String, val intervalle: Intervalle?, val detail: String, val net: Boolean = false)
 
 /**
  * Point = estimation, barre = intervalle de confiance à 95 %, trait vertical = zéro.
- * Une barre qui croise zéro : pas d'effet net. Échelle commune à toutes les lignes.
+ * En couleur : effet retenu après correction de Benjamini-Hochberg. Échelle commune à toutes les lignes.
  */
 @Composable
 fun ForestPlot(items: List<ItemForest>, unite: String, decimales: Int) {
@@ -234,7 +261,7 @@ fun ForestPlot(items: List<ItemForest>, unite: String, decimales: Int) {
                     Text(item.libelle, style = MaterialTheme.typography.bodyMedium)
                     val i = item.intervalle
                     if (i != null) {
-                        val couleur = if (i.contientZero) p.attenuee else p.principale
+                        val couleur = if (item.net) p.principale else p.attenuee
                         Canvas(
                             modifier = Modifier
                                 .fillMaxWidth()

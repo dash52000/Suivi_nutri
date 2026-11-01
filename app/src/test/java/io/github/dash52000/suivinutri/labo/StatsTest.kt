@@ -70,4 +70,66 @@ class StatsTest {
         assertEquals(-3.0, r.bas, 0.0)
         assertEquals(-1.0, r.haut, 0.0)
     }
+
+    @Test
+    fun pValeursStudent() {
+        assertEquals(0.0738711962, Stats.pStudent(2.1, 7.0), 1e-8)
+        assertEquals(0.6514479648, Stats.pStudent(0.5, 3.0), 1e-8)
+        assertEquals(0.0057629694, Stats.pStudent(-3.2, 15.5), 1e-8)
+        assertEquals(0.5, Stats.pStudent(1.0, 1.0), 1e-8)
+        assertEquals(0.0002659124, Stats.pStudent(4.0, 40.0), 1e-9)
+    }
+
+    @Test
+    fun pValeursNormales() {
+        assertEquals(0.7641771556, Stats.pNormal(0.3), 1e-6)
+        assertEquals(0.0499957903, Stats.pNormal(1.96), 1e-7)
+        assertEquals(0.0124193307, Stats.pNormal(-2.5), 1e-7)
+        assertEquals(0.0009668483, Stats.pNormal(3.3), 1e-8)
+    }
+
+    @Test
+    fun benjaminiHochberg() {
+        val q = Stats.benjaminiHochberg(listOf(0.01, 0.04, 0.03, 0.20, 0.002, 0.5))
+        val attendu = listOf(0.03, 0.06, 0.06, 0.24, 0.012, 0.5)
+        attendu.indices.forEach { assertEquals(attendu[it], q[it], 1e-12) }
+    }
+
+    private val x1 = listOf(0, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1)
+    private val x2 = listOf(1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0)
+    private val yy = listOf(
+        -0.064194, -0.092441, 0.500125, 0.828678, 0.240213, 0.122355, 0.573007, -0.156635, 0.104873, -0.119955,
+        0.800174, 0.831557, 0.197301, -0.039058, -0.038992, -0.061819, -0.456158, -0.07379, 0.041141, 0.369629,
+        0.943567, 0.202942, -0.338393, 0.794071,
+    )
+    private val lignes = x1.indices.map { doubleArrayOf(1.0, x1[it].toDouble(), x2[it].toDouble()) }
+
+    /** Référence : statsmodels OLS, cov_type HAC, maxlags 2, use_correction. */
+    @Test
+    fun regressionMultipleHac() {
+        val r = Stats.olsHac(lignes, yy, (0 until 24).toList(), 2)!!
+        assertEquals(0.04955046, r.coef[0], 1e-7)
+        assertEquals(0.59049024, r.coef[1], 1e-7)
+        assertEquals(-0.11628544, r.coef[2], 1e-7)
+        assertEquals(0.05542753, r.se[0], 1e-7)
+        assertEquals(0.07915353, r.se[1], 1e-7)
+        assertEquals(0.07792462, r.se[2], 1e-7)
+        assertEquals(21, r.ddl)
+    }
+
+    /** Même données avec un trou de 8 jours après la 12e observation : aucun croisement à travers le trou. */
+    @Test
+    fun regressionMultipleHacAvecTrou() {
+        val positions = (0 until 12).toList() + (20 until 32).toList()
+        val r = Stats.olsHac(lignes, yy, positions, 2)!!
+        assertEquals(0.06134211, r.se[0], 1e-7)
+        assertEquals(0.0998808, r.se[1], 1e-7)
+        assertEquals(0.08890919, r.se[2], 1e-7)
+    }
+
+    @Test
+    fun matriceSinguliere() {
+        val colineaires = (0 until 10).map { doubleArrayOf(1.0, it.toDouble(), 2.0 * it) }
+        assertEquals(null, Stats.olsHac(colineaires, (0 until 10).map { it.toDouble() }, (0 until 10).toList(), 1))
+    }
 }

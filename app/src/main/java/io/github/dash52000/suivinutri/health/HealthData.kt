@@ -24,12 +24,16 @@ data class Activite(
     val debut: LocalDateTime,
     val dureeMin: Long,
     val type: String,
+    /** Course, rando, vélo, natation : ce qui vide vraiment le glycogène sur une longue durée. */
+    val endurance: Boolean = false,
 )
 
 /** Résumé d'une journée, tel que lu dans Health Connect. Null = pas de donnée. */
 data class Journee(
     val date: LocalDate,
     val poidsKg: Double?,
+    /** Heure locale de la pesée retenue (la première du jour). */
+    val poidsHeure: Int? = null,
     val kcalTotal: Double?,
     val sommeilMin: Long?,
     val activites: List<Activite>,
@@ -147,10 +151,10 @@ class HealthData(context: Context) {
         val t0 = debut.debutInstant()
         val t1 = fin.plusDays(1).debutInstant()
 
-        // Poids : la première pesée du jour (le matin, à jeun, en principe).
+        // Poids : la première pesée du jour (le matin, à jeun, en principe). Les doublons disparaissent avec.
         val poids = lireTout<WeightRecord>(t0, t1)
             .groupBy { it.time.atZone(zone).toLocalDate() }
-            .mapValues { (_, pesees) -> pesees.minBy { it.time }.weight.inKilograms }
+            .mapValues { (_, pesees) -> pesees.minBy { it.time } }
 
         // Sommeil : rattaché au jour du réveil.
         val sommeil = lireTout<SleepSessionRecord>(t0.minus(Duration.ofHours(12)), t1)
@@ -163,6 +167,7 @@ class HealthData(context: Context) {
                     debut = it.startTime.atZone(zone).toLocalDateTime(),
                     dureeMin = Duration.between(it.startTime, it.endTime).toMinutes(),
                     type = libelleActivite(it.exerciseType, it.title),
+                    endurance = it.exerciseType in TYPES_ENDURANCE,
                 )
             }
             .groupBy { it.debut.toLocalDate() }
@@ -174,7 +179,8 @@ class HealthData(context: Context) {
             .map { jour ->
                 Journee(
                     date = jour,
-                    poidsKg = poids[jour],
+                    poidsKg = poids[jour]?.weight?.inKilograms,
+                    poidsHeure = poids[jour]?.time?.atZone(zone)?.hour,
                     kcalTotal = kcal[jour],
                     sommeilMin = sommeil[jour],
                     activites = activites[jour].orEmpty().sortedBy { it.debut },
@@ -197,6 +203,16 @@ class HealthData(context: Context) {
         )
     }
 }
+
+private val TYPES_ENDURANCE = setOf(
+    ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,
+    ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL,
+    ExerciseSessionRecord.EXERCISE_TYPE_HIKING,
+    ExerciseSessionRecord.EXERCISE_TYPE_BIKING,
+    ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY,
+    ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL,
+    ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER,
+)
 
 fun libelleActivite(type: Int, titre: String?): String = when (type) {
     ExerciseSessionRecord.EXERCISE_TYPE_RUNNING,

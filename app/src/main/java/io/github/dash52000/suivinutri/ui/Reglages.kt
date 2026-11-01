@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,7 +49,14 @@ import io.github.dash52000.suivinutri.data.QuestionPerso
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.TypePerso
 import io.github.dash52000.suivinutri.data.Usage
+import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.labo.TableAnalyse
+import io.github.dash52000.suivinutri.labo.collecterJours
+import io.github.dash52000.suivinutri.labo.joursSansSante
 import io.github.dash52000.suivinutri.notif.Rappel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
 
@@ -61,8 +69,9 @@ private val libellesConditions = listOf(
 )
 
 @Composable
-fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
+fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var actif by remember { mutableStateOf(Rappel.actif(context)) }
     var heure by remember { mutableIntStateOf(Rappel.heure(context)) }
     var minute by remember { mutableIntStateOf(Rappel.minute(context)) }
@@ -83,8 +92,24 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
     }
     val exporterCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
-            message = ecrire(context, uri, journal.exportCsv(config.perso()), "CSV enregistré.")
-            Usage.log(context, "export", "csv")
+            message = "Préparation de la table d'analyse…"
+            scope.launch {
+                val aujourdHui = LocalDate.now()
+                // Une colonne par question : intégrées, perso, puis l'alcool.
+                val ids = Questionnaire.questions.map { it.id } + config.perso().map { it.id } + Questionnaire.ID_ALCOOL
+                val (jours, complet) = try {
+                    collecterJours(health, journal, aujourdHui) to true
+                } catch (e: SecurityException) {
+                    joursSansSante(journal.toutes()) to false
+                }
+                val texte = withContext(Dispatchers.Default) { TableAnalyse.csv(jours, aujourdHui, ids) }
+                message = ecrire(
+                    context, uri, texte,
+                    if (complet) "Table d'analyse enregistrée (une ligne par jour)."
+                    else "Health Connect inaccessible : table enregistrée avec tes réponses seulement.",
+                )
+                Usage.log(context, "export", if (complet) "analyse" else "analyse_sans_sante")
+            }
         }
     }
     val exporterUsage = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -192,6 +217,11 @@ fun EcranReglages(journal: Journal, config: Configuration, modifier: Modifier = 
         OutlinedButton(onClick = { exporterCsv.launch("suivi-nutri-${LocalDate.now()}.csv") }) {
             Text("Exporter pour R (CSV)")
         }
+        Text(
+            "Une ligne par jour : pesée, tendance et son incertitude, dépense, sommeil, séances, réponses, alcool.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         OutlinedButton(onClick = { importer.launch(arrayOf("application/json", "application/octet-stream", "*/*")) }) {
             Text("Restaurer une sauvegarde")
         }

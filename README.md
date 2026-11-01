@@ -24,23 +24,34 @@ jour qui s'installe par-dessus l'appli existante.
 
 ## Labo
 
-- Tendance du poids : lissage exponentiel (α = 0,1 par pesée).
-- Apports estimés par semaine : dépense moyenne + Δ tendance × 7 700 kcal/kg ÷ 7.
-- Effet lendemain : différence de moyennes, intervalle de Welch.
-- Effets sur plusieurs semaines : pente de régression, un réflexe à la fois,
-  erreur-type de Newey-West (retard 1, seules les semaines voisines comptent).
-  Les apports de chaque semaine y sont recalculés sans le retard de la tendance
-  lissée (≈ 9 jours) : dépense + (moyenne des pesées de la semaine suivante −
-  moyenne de la semaine précédente) ÷ 2 × 7 700 ÷ 7, fenêtre centrée sur la semaine.
-- Niveau absolu des apports probablement surestimé (dépense de la montre) :
-  seules les variations sont interprétées.
-- Effets croisés : différence de proportions, intervalle d'Agresti-Caffo.
-  Croisements : nuit courte et alcool la veille → rab / dessert ; tupp remplis la veille →
-  tupp mangé le midi ; séance le midi → petit creux l'après-midi ; petit creux → rab le soir.
-- Minimum : 5 observations par groupe, 8 semaines pour les régressions.
+- **Tendance du poids** : filtre et lisseur de Kalman (niveau local + pente, pas journalier).
+  Bruit de pesée (0,6 kg)² le matin, (1,2 kg)² l'après-midi ; bruit du niveau (0,05 kg/j)²,
+  de la pente (0,005 kg/j par jour)². Pesée écartée si elle tombe à plus de 4 écarts-types de
+  la prévision. Le lisseur (Rauch-Tung-Striebel) n'a pas de retard et donne une bande d'incertitude.
+- **Apports estimés** : dépense moyenne + Δ niveau lissé (lundi matin → lundi matin) × 7 700 ÷ 7,
+  avec IC 95 % tiré de la covariance a posteriori des deux niveaux (covariance croisée du lisseur).
+  Semaine complète : ≥ 3 pesées retenues et ≥ 5 jours de dépense. Semaine en cours dès 2 jours écoulés.
+  Niveau absolu probablement surestimé (dépense de la montre) : seules les variations comptent.
+- **Lendemain** : régression jointe de l'écart pesée − tendance à J+1 (J+2, J+3 pour la décroissance)
+  sur toutes les expositions du soir J à la fois : rab, dessert, alcool, beaux-parents, longue sortie
+  (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
+  les jours complets ; ≥ 15 jours complets. Erreurs-types de Newey-West (retard 2 jours, jours voisins seulement).
+- **Plusieurs semaines** : pente de régression des apports estimés sur le taux de chaque réflexe,
+  un réflexe à la fois, Newey-West (retard 1 semaine). Au moins 8 semaines.
+- **Effets croisés** : différence de proportions, intervalle d'Agresti-Caffo.
+  Nuit courte et alcool la veille → rab / dessert ; tupp remplis la veille → tupp mangé le midi ;
+  séance le midi → petit creux ; petit creux → rab le soir.
+- **Tests multiples** : correction de Benjamini-Hochberg sur l'ensemble des effets ; un effet n'est
+  présenté comme net (en couleur) que si q < 5 %.
 
-Les tests unitaires (`app/src/test`) comparent ces calculs à des valeurs de
-référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
+Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
+contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
+
+## Export pour l'analyse R
+
+Réglages > Exporter pour R : une ligne par jour (`read.csv`), avec pesée et heure, pesée écartée,
+tendance et son écart-type, pente (kg/semaine), résidu, dépense, sommeil, minutes de séance, séance du
+midi, longue sortie, toutes les réponses, nombre de boissons et unités d'alcool.
 
 ## Feuille de route
 
@@ -54,5 +65,11 @@ référence obtenues avec scipy et statsmodels ; ils tournent à chaque build.
 - **v0.7** : question « pris ton temps », analyse hebdo alignée, option « masquer la pesée du jour »
 - **v0.8** : section Midi (6 questions), questionnaire par moment de la journée, réflexes et effets croisés du midi dans le labo
 - **v0.9** : journal d'utilisation local (notifs, ouvertures, réponses horodatées, écrans), exportable
+- **v1.5** : tendance de Kalman avec bande d'incertitude, apports avec IC et semaine en cours,
+  régression jointe du lendemain (dont les longues sorties), correction de Benjamini-Hochberg,
+  pesées pondérées (après-midi, aberrantes, doublons), export journalier complet pour R
+- **Avant la v2, obligatoire** : une analyse en R sur l'export (validation des paramètres du Kalman,
+  des effets estimés et des réflexes à garder, à partir du journal d'utilisation). La suite n'est
+  lancée qu'au vu de ses conclusions.
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

@@ -5,6 +5,7 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.sqrt
 
 /** Une journée vue par le labo : données Health Connect + réponses du questionnaire. */
 data class JourLabo(
@@ -15,23 +16,41 @@ data class JourLabo(
     val entree: EntreeJour? = null,
     /** Séance démarrée entre 10 h et 14 h 59 ; null si Health Connect n'a rien pour ce jour. */
     val seanceMidi: Boolean? = null,
+    /** Heure locale de la pesée (0 à 23). */
+    val heurePesee: Int? = null,
+    /** Séance d'endurance d'au moins [Labo.LONGUE_SORTIE_MIN] minutes ; null si Health Connect n'a rien lu. */
+    val longueSortie: Boolean? = null,
+    val minutesSeances: Long? = null,
 )
 
-data class PointPoids(val date: LocalDate, val brut: Double?, val tendance: Double)
+data class PointPoids(
+    val date: LocalDate,
+    val brut: Double?,
+    val tendance: Double,
+    val seTendance: Double,
+    /** Pesée écartée par le Kalman (aberrante). */
+    val ecartee: Boolean,
+    val apresMidi: Boolean,
+)
 
+/**
+ * Apports estimés d'une semaine (ou des jours écoulés de la semaine en cours) :
+ * dépense moyenne + variation du niveau lissé × 7 700 kcal/kg ÷ nombre de jours, avec IC 95 %.
+ */
 data class SemaineApports(
     val lundi: LocalDate,
     val depenseMoyenne: Double,
     val deltaTendanceKg: Double,
-    val apportsEstimes: Double,
+    val apports: Intervalle,
     val nbPesees: Int,
     val nbJoursDepense: Int,
-)
+    val enCours: Boolean,
+    val nbJours: Int,
+) {
+    val apportsEstimes: Double get() = apports.estimation
+}
 
-/** Apports d'une semaine, alignés dans le temps pour l'analyse des réflexes. */
-data class SemaineAnalyse(val lundi: LocalDate, val apports: Double)
-
-/** Écart de poids après un soir « exposé », comparé aux autres soirs. */
+/** Effet d'une exposition du jour J sur l'écart du poids à la tendance, à J+1 (avec IC), J+2 et J+3. */
 data class EffetLendemain(
     val libelle: String,
     val n1: Int,
@@ -39,6 +58,8 @@ data class EffetLendemain(
     val j1: Intervalle?,
     val j2: Double?,
     val j3: Double?,
+    /** q-valeur de Benjamini-Hochberg, sur l'ensemble des effets du labo. */
+    val q: Double? = null,
 )
 
 /** Effet d'un réflexe sur les apports estimés, semaine par semaine. */
@@ -47,6 +68,7 @@ data class EffetSemaine(
     val parQuoi: String,
     val nbSemaines: Int,
     val effet: Intervalle?,
+    val q: Double? = null,
 )
 
 /** Une exposition (nuit courte, alcool la veille) et sa fréquence d'issue (rab, dessert). */
@@ -59,6 +81,7 @@ data class EffetCroise(
     val p1: Double?,
     val p0: Double?,
     val ecart: Intervalle?,
+    val q: Double? = null,
 )
 
 data class Qualite(
@@ -87,13 +110,18 @@ data class ResultatLabo(
 
 object Labo {
 
-    /** Lissage exponentiel de la tendance (une pesée pèse 10 %). */
-    const val ALPHA = 0.1
     const val KCAL_PAR_KG = 7700.0
     const val MIN_GROUPE = 5
     const val MIN_SEMAINES = 8
     const val NUIT_COURTE_MIN = 390L
-    private const val MIN_PESEES_AVANT = 5
+    const val LONGUE_SORTIE_MIN = 75L
+
+    /** Seuil de q-valeur (Benjamini-Hochberg) pour qu'un effet soit présenté comme net. */
+    const val SEUIL_Q = 0.05
+
+    /** Régression du lendemain : au moins 15 jours complets, retard de Newey-West de 2 jours. */
+    const val MIN_JOURS_REGRESSION = 15
+    private const val RETARD_JOURS = 2
     private const val KCAL_JOUR_MIN = 800.0
 
     // ---------- Codage des réponses ----------
@@ -155,20 +183,28 @@ object Labo {
 
     // ---------- Poids ----------
 
-    /** Tendance lissée, reportée sur les jours sans pesée. */
-    fun tendance(jours: List<JourLabo>): Map<LocalDate, Double> {
-        val resultat = LinkedHashMap<LocalDate, Double>()
-        var t: Double? = null
-        for (j in jours.sortedBy { it.date }) {
-            val p = j.poids
-            if (p != null) {
-                val precedente = t
-                t = if (precedente == null) p else precedente + ALPHA * (p - precedente)
-            }
-            val courante = t
-            if (courante != null) resultat[j.date] = courante
+    /** Pesée retenue d'un jour (non écartée par le Kalman). */
+    private fun peseeRetenue(lis: Kalman.Lissage, parDate: Map<LocalDate, JourLabo>, d: LocalDate): Double? {
+        val i = lis.index(d) ?: return null
+        if (i in lis.ecartees) return null
+        return parDate[d]?.poids
+    }
+
+    /** Lissage de Kalman de toutes les pesées, de la première jusqu'à aujourd'hui. Null sans pesée. */
+    fun lissage(jours: List<JourLabo>, aujourdHui: LocalDate): Kalman.Lissage? {
+        val pesees = jours.filter { it.poids != null }.sortedBy { it.date }
+        if (pesees.isEmpty()) return null
+        val debut = pesees.first().date
+        val fin = maxOf(aujourdHui, pesees.last().date)
+        val n = ChronoUnit.DAYS.between(debut, fin).toInt() + 1
+        val mesures = pesees.map { j ->
+            Kalman.Pesee(
+                jour = ChronoUnit.DAYS.between(debut, j.date).toInt(),
+                poids = j.poids!!,
+                variance = Kalman.variancePesee(j.heurePesee),
+            )
         }
-        return resultat
+        return Kalman.lisser(debut, n, mesures)
     }
 
     // ---------- Analyse complète ----------
@@ -184,85 +220,93 @@ object Labo {
     ): ResultatLabo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
-        val tendance = tendance(tries)
+        val lis = lissage(tries, aujourdHui)
 
-        val poids = tries
-            .filter { !it.date.isBefore(aujourdHui.minusDays(89)) }
-            .mapNotNull { j -> tendance[j.date]?.let { PointPoids(j.date, j.poids, it) } }
+        val poids = if (lis == null) emptyList() else {
+            val depuis = maxOf(lis.debut, aujourdHui.minusDays(89))
+            generateSequence(depuis) { it.plusDays(1) }
+                .takeWhile { !it.isAfter(aujourdHui) }
+                .mapNotNull { d ->
+                    val i = lis.index(d) ?: return@mapNotNull null
+                    val j = parDate[d]
+                    PointPoids(
+                        date = d,
+                        brut = j?.poids,
+                        tendance = lis.niveau(i),
+                        seTendance = sqrt(lis.varNiveau(i)),
+                        ecartee = i in lis.ecartees,
+                        apresMidi = (j?.heurePesee ?: 0) >= Kalman.HEURE_APRES_MIDI,
+                    )
+                }
+                .toList()
+        }
 
-        val semaines = semaines(tries, parDate, tendance, aujourdHui)
-        val analyse = semainesAnalyse(tries, aujourdHui)
+        val semaines = if (lis == null) emptyList() else semaines(parDate, lis, aujourdHui)
+        val lendemain = lendemain(tries, parDate, lis)
+        val effetsSemaine = effetsSemaine(parDate, semaines.filter { !it.enCours }, reflexes + reflexesPerso)
+        val croises = croises(tries, parDate)
+
+        // Benjamini-Hochberg sur l'ensemble des effets testés : une vingtaine d'intervalles à 95 %
+        // donneraient sinon environ un « effet » par pur hasard.
+        val pValeurs = lendemain.mapNotNull { it.j1?.p } + effetsSemaine.mapNotNull { it.effet?.p } +
+            croises.mapNotNull { it.ecart?.p }
+        val q = Stats.benjaminiHochberg(pValeurs).iterator()
 
         return ResultatLabo(
             poids = poids,
             semaines = semaines.sortedByDescending { it.lundi },
-            lendemain = lendemain(tries, parDate),
-            effetsSemaine = effetsSemaine(parDate, analyse, reflexes + reflexesPerso),
-            croises = croises(tries, parDate),
+            lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
+            effetsSemaine = effetsSemaine.map { e -> if (e.effet?.p != null) e.copy(q = q.next()) else e },
+            croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
             qualite = qualite(tries, parDate, aujourdHui),
         )
     }
 
-    /** Apports estimés = dépense moyenne + variation de la tendance × 7 700 kcal/kg ÷ 7. Semaines complètes seulement. */
+    /**
+     * Semaines complètes (lundi matin → lundi matin suivant) avec au moins 3 pesées retenues et 5 jours de
+     * dépense, puis la semaine en cours dès 2 jours écoulés. Le niveau lissé du lundi matin reflète ce qui a
+     * été mangé jusqu'au dimanche soir.
+     */
     private fun semaines(
-        tries: List<JourLabo>,
         parDate: Map<LocalDate, JourLabo>,
-        tendance: Map<LocalDate, Double>,
+        lis: Kalman.Lissage,
         aujourdHui: LocalDate,
     ): List<SemaineApports> {
-        if (tries.isEmpty()) return emptyList()
-        val premierLundi = tries.first().date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        val dernierLundi = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1)
         val resultat = mutableListOf<SemaineApports>()
-        var lundi = premierLundi
-        while (!lundi.isAfter(dernierLundi)) {
-            val veille = lundi.minusDays(1)
-            val dimanche = lundi.plusDays(6)
-            val tDebut = tendance[veille]
-            val tFin = tendance[dimanche]
-            val semaine = (0L..6L).mapNotNull { parDate[lundi.plusDays(it)] }
-            val kcal = semaine.mapNotNull { it.kcal }.filter { it >= KCAL_JOUR_MIN }
-            val pesees = semaine.count { it.poids != null }
-            val peseesAvant = tries.count { it.poids != null && !it.date.isAfter(veille) }
-            if (tDebut != null && tFin != null && kcal.size >= 5 && pesees >= 3 && peseesAvant >= MIN_PESEES_AVANT) {
-                val depense = kcal.average()
-                val delta = tFin - tDebut
-                resultat += SemaineApports(lundi, depense, delta, depense + delta * KCAL_PAR_KG / 7, pesees, kcal.size)
-            }
-            lundi = lundi.plusWeeks(1)
-        }
-        return resultat
-    }
+        val lundiCourant = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
-    /**
-     * Apports de la semaine pour l'analyse, sans le retard de la tendance lissée (environ 9 jours) :
-     * dépense moyenne de la semaine + différence centrée des pesées moyennes,
-     * (moyenne semaine suivante − moyenne semaine précédente) ÷ 2, × 7 700 kcal/kg ÷ 7.
-     * La fenêtre est centrée sur la semaine, donc alignée avec les réflexes de cette même semaine.
-     * Il faut au moins 3 pesées dans chacune des semaines voisines et 5 jours de dépense.
-     */
-    fun semainesAnalyse(jours: List<JourLabo>, aujourdHui: LocalDate): List<SemaineAnalyse> {
-        if (jours.isEmpty()) return emptyList()
-        val parDate = jours.associateBy { it.date }
-        fun moyennePesees(lundi: LocalDate): Double? {
-            val p = (0L..6L).mapNotNull { parDate[lundi.plusDays(it)]?.poids }
-            return if (p.size >= 3) p.average() else null
+        fun estimer(lundi: LocalDate, jours: Int, enCours: Boolean, minPesees: Int, minDepense: Int) {
+            val i = lis.index(lundi) ?: return
+            if (i + jours >= lis.n) return
+            val periode = (0 until jours).map { lundi.plusDays(it.toLong()) }
+            // Semaine en cours : la pesée de ce matin compte aussi.
+            val joursPesees = if (enCours) periode + aujourdHui else periode
+            val pesees = joursPesees.count { peseeRetenue(lis, parDate, it) != null }
+            val kcal = periode.mapNotNull { parDate[it]?.kcal }.filter { it >= KCAL_JOUR_MIN }
+            if (pesees < minPesees || kcal.size < minDepense) return
+            val delta = lis.niveau(i + jours) - lis.niveau(i)
+            val parKg = KCAL_PAR_KG / jours
+            val estimation = kcal.average() + delta * parKg
+            val se = sqrt(lis.varDifference(i, jours)) * parKg
+            resultat += SemaineApports(
+                lundi = lundi,
+                depenseMoyenne = kcal.average(),
+                deltaTendanceKg = delta,
+                apports = Intervalle(estimation, estimation - Stats.Z975 * se, estimation + Stats.Z975 * se),
+                nbPesees = pesees,
+                nbJoursDepense = kcal.size,
+                enCours = enCours,
+                nbJours = jours,
+            )
         }
-        val premierLundi = jours.minOf { it.date }.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        // La semaine suivante doit être complète : la dernière semaine analysable est l'avant-dernière.
-        val dernierLundi = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(2)
-        val resultat = mutableListOf<SemaineAnalyse>()
-        var lundi = premierLundi
-        while (!lundi.isAfter(dernierLundi)) {
-            val avant = moyennePesees(lundi.minusWeeks(1))
-            val apres = moyennePesees(lundi.plusWeeks(1))
-            val kcal = (0L..6L).mapNotNull { parDate[lundi.plusDays(it)]?.kcal }.filter { it >= KCAL_JOUR_MIN }
-            if (avant != null && apres != null && kcal.size >= 5) {
-                val deltaSemaine = (apres - avant) / 2
-                resultat += SemaineAnalyse(lundi, kcal.average() + deltaSemaine * KCAL_PAR_KG / 7)
-            }
+
+        var lundi = lis.debut.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
+        while (lundi.isBefore(lundiCourant)) {
+            estimer(lundi, 7, enCours = false, minPesees = 3, minDepense = 5)
             lundi = lundi.plusWeeks(1)
         }
+        val ecoules = ChronoUnit.DAYS.between(lundiCourant, aujourdHui).toInt()
+        if (ecoules >= 2) estimer(lundiCourant, ecoules, enCours = true, minPesees = 1, minDepense = 2)
         return resultat
     }
 
@@ -272,55 +316,100 @@ object Labo {
         return apres - avant
     }
 
-    /** Effet lendemain : pesée du matin J+k moins pesée du matin J, soirs exposés contre les autres. */
-    private fun lendemain(tries: List<JourLabo>, parDate: Map<LocalDate, JourLabo>): List<EffetLendemain> {
-        val expositions: List<Pair<String, (EntreeJour?) -> Boolean?>> = listOf(
-            "Soir avec rab" to { e: EntreeJour? -> rab(e) },
-            "Dessert pris" to { e: EntreeJour? -> dessertPris(e) },
-            "Soir avec alcool" to { e: EntreeJour? -> alcool(e) },
-            "Dîner chez les beaux-parents" to { e: EntreeJour? -> beauxParents(e) },
+    /**
+     * Effet lendemain par régression jointe : l'écart de la pesée de J+k à la tendance lissée est expliqué
+     * par toutes les expositions du jour J à la fois (rab, dessert, alcool, beaux-parents, longue sortie).
+     * Chaque effet est donc estimé « à expositions égales par ailleurs ». Une exposition n'entre dans le
+     * modèle que si elle compte au moins [MIN_GROUPE] jours exposés et [MIN_GROUPE] non exposés parmi les
+     * jours complets. Erreurs-types de Newey-West (retard 2 jours).
+     */
+    private fun lendemain(
+        tries: List<JourLabo>,
+        parDate: Map<LocalDate, JourLabo>,
+        lis: Kalman.Lissage?,
+    ): List<EffetLendemain> {
+        val expositions: List<Pair<String, (JourLabo) -> Boolean?>> = listOf(
+            "Soir avec rab" to { j: JourLabo -> rab(j.entree) },
+            "Dessert pris" to { j: JourLabo -> dessertPris(j.entree) },
+            "Soir avec alcool" to { j: JourLabo -> alcool(j.entree) },
+            "Dîner chez les beaux-parents" to { j: JourLabo -> beauxParents(j.entree) },
+            "Longue sortie (1 h 15 et plus)" to { j: JourLabo -> j.longueSortie },
         )
-        return expositions.map { (libelle, expose) ->
-            fun groupes(k: Long): Pair<List<Double>, List<Double>> {
-                val oui = mutableListOf<Double>()
-                val non = mutableListOf<Double>()
-                tries.forEach { j ->
-                    val e = expose(j.entree) ?: return@forEach
-                    val d = ecartPoids(parDate, j.date, k) ?: return@forEach
-                    if (e) oui += d else non += d
-                }
-                return oui to non
+        if (lis == null) return expositions.map { (l, _) -> EffetLendemain(l, 0, 0, null, null, null) }
+
+        fun residu(d: LocalDate): Double? {
+            val y = peseeRetenue(lis, parDate, d) ?: return null
+            return y - lis.niveau(lis.index(d)!!)
+        }
+
+        class Ligne(val position: Int, val residu: Double, val x: List<Boolean?>)
+
+        fun lignes(k: Long): List<Ligne> = tries.mapNotNull { j ->
+            val e = residu(j.date.plusDays(k)) ?: return@mapNotNull null
+            Ligne(j.date.toEpochDay().toInt(), e, expositions.map { (_, f) -> f(j) })
+        }
+
+        fun compte(l: List<Ligne>, v: Int) = l.count { it.x[v] == true } to l.count { it.x[v] == false }
+
+        // Sélection des expositions sur J+1, jusqu'à stabilité (les jours complets dépendent de la sélection).
+        val l1 = lignes(1)
+        var retenues = expositions.indices.filter { v ->
+            val (oui, non) = compte(l1.filter { it.x[v] != null }, v)
+            oui >= MIN_GROUPE && non >= MIN_GROUPE
+        }
+        var completes: List<Ligne> = l1
+        while (true) {
+            completes = l1.filter { ligne -> retenues.all { ligne.x[it] != null } }
+            val stables = retenues.filter { v ->
+                val (oui, non) = compte(completes, v)
+                oui >= MIN_GROUPE && non >= MIN_GROUPE
             }
-            fun ecartMoyen(k: Long): Double? {
-                val (oui, non) = groupes(k)
-                return if (oui.size >= MIN_GROUPE && non.size >= MIN_GROUPE) Stats.moyenne(oui) - Stats.moyenne(non) else null
-            }
-            val (oui, non) = groupes(1)
-            val assez = oui.size >= MIN_GROUPE && non.size >= MIN_GROUPE
+            if (stables == retenues) break
+            retenues = stables
+        }
+
+        fun ajuster(lignes: List<Ligne>): ResultatOls? {
+            val c = lignes.filter { ligne -> retenues.all { ligne.x[it] != null } }
+            if (retenues.isEmpty() || c.size < MIN_JOURS_REGRESSION || c.size - retenues.size - 1 < 5) return null
+            return Stats.olsHac(
+                c.map { ligne -> DoubleArray(retenues.size + 1) { a -> if (a == 0) 1.0 else if (ligne.x[retenues[a - 1]] == true) 1.0 else 0.0 } },
+                c.map { it.residu },
+                c.map { it.position },
+                RETARD_JOURS,
+            )
+        }
+
+        val m1 = ajuster(l1)
+        val m2 = if (m1 != null) ajuster(lignes(2)) else null
+        val m3 = if (m1 != null) ajuster(lignes(3)) else null
+
+        return expositions.mapIndexed { v, (libelle, _) ->
+            val a = retenues.indexOf(v)
+            val (oui, non) = if (a >= 0 && m1 != null) compte(completes, v) else compte(l1.filter { it.x[v] != null }, v)
             EffetLendemain(
                 libelle = libelle,
-                n1 = oui.size,
-                n0 = non.size,
-                j1 = if (assez) Stats.welch(oui, non) else null,
-                j2 = if (assez) ecartMoyen(2) else null,
-                j3 = if (assez) ecartMoyen(3) else null,
+                n1 = oui,
+                n0 = non,
+                j1 = if (a >= 0) m1?.intervalle(a + 1) else null,
+                j2 = if (a >= 0) m2?.coef?.get(a + 1) else null,
+                j3 = if (a >= 0) m3?.coef?.get(a + 1) else null,
             )
         }
     }
 
-    /** Réflexes agrégés par semaine, mis face aux apports de la même semaine (version alignée). */
+    /** Réflexes agrégés par semaine, mis face aux apports estimés de la même semaine (Kalman, sans retard). */
     private fun effetsSemaine(
         parDate: Map<LocalDate, JourLabo>,
-        semaines: List<SemaineAnalyse>,
+        semaines: List<SemaineApports>,
         aAnalyser: List<Pair<String, (EntreeJour) -> Double?>>,
     ): List<EffetSemaine> {
-        fun joursDe(s: SemaineAnalyse) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
-        fun position(s: SemaineAnalyse) = (s.lundi.toEpochDay() / 7).toInt()
+        fun joursDe(s: SemaineApports) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
+        fun position(s: SemaineApports) = (s.lundi.toEpochDay() / 7).toInt()
 
         val effets = aAnalyser.map { (libelle, score) ->
             val points = semaines.mapNotNull { s ->
                 val scores = joursDe(s).mapNotNull { j -> j.entree?.let(score) }
-                if (scores.size >= 2) Triple(scores.average(), s.apports, position(s)) else null
+                if (scores.size >= 2) Triple(scores.average(), s.apportsEstimes, position(s)) else null
             }
             val effet = if (points.size >= MIN_SEMAINES) {
                 Stats.penteNeweyWest(points.map { it.first }, points.map { it.second }, points.map { it.third })
@@ -331,7 +420,7 @@ object Labo {
 
         val pointsAlcool = semaines.mapNotNull { s ->
             val u = joursDe(s).mapNotNull { unites(it.entree) }
-            if (u.size >= 4) Triple(u.sum() / u.size * 7, s.apports, position(s)) else null
+            if (u.size >= 4) Triple(u.sum() / u.size * 7, s.apportsEstimes, position(s)) else null
         }
         val effetAlcool = if (pointsAlcool.size >= MIN_SEMAINES) {
             Stats.penteNeweyWest(pointsAlcool.map { it.first }, pointsAlcool.map { it.second }, pointsAlcool.map { it.third })
