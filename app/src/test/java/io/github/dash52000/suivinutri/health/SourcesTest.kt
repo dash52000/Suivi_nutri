@@ -32,4 +32,11 @@ class SourcesTest {
         assertEquals("withings", Sources.libelle("com.withings.wiscale2"))
         assertEquals("garmin", Sources.libelle("com.garmin.android.apps.connectmobile"))
     }
+
+    @Test
+    fun seancesEtSommeilGarminSeulement() {
+        val garmin = Mesure("com.garmin.android.apps.connectmobile", matin, 0.0)
+        val strava = Mesure("com.strava", matin, 0.0)
+        assertEquals(listOf(garmin), Sources.garminSeulement(listOf(garmin, strava)) { it.paquet })
+    }
 }

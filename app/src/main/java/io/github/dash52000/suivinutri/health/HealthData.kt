@@ -205,12 +205,15 @@ class HealthData(context: Context) {
             { lireTout<BoneMassRecord>(t0, t1) }, { it.time }, { it.metadata.dataOrigin.packageName },
         )
 
-        // Sommeil : rattaché au jour du réveil.
-        val sommeil = lireTout<SleepSessionRecord>(t0.minus(Duration.ofHours(12)), t1)
+        // Sommeil : rattaché au jour du réveil, Garmin seulement (une autre appli le recopie, d'où des doubles).
+        val sommeil = Sources.garminSeulement(lireTout<SleepSessionRecord>(t0.minus(Duration.ofHours(12)), t1)) {
+            it.metadata.dataOrigin.packageName
+        }
             .groupBy { it.endTime.atZone(zone).toLocalDate() }
             .mapValues { (_, nuits) -> nuits.sumOf { dureeSommeilMin(it) } }
 
-        val activites = lireTout<ExerciseSessionRecord>(t0, t1)
+        // Séances : Garmin seulement, pour la même raison.
+        val activites = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
             .map {
                 Activite(
                     debut = it.startTime.atZone(zone).toLocalDateTime(),

@@ -8,10 +8,15 @@ object Sources {
     /** Balance connectée Withings (appli com.withings.wiscale2). */
     fun estWithings(paquet: String): Boolean = paquet.contains("withings", ignoreCase = true)
 
+    /** Garmin Connect : seule source retenue pour les séances et le sommeil (sinon doublons Strava, etc.). */
+    fun estGarmin(paquet: String): Boolean = paquet.contains("garmin", ignoreCase = true)
+
+    fun <T> garminSeulement(mesures: List<T>, paquet: (T) -> String): List<T> = mesures.filter { estGarmin(paquet(it)) }
+
     /** Libellé court pour l'export : withings, garmin ou le nom du paquet. */
     fun libelle(paquet: String): String = when {
         estWithings(paquet) -> "withings"
-        paquet.contains("garmin", ignoreCase = true) -> "garmin"
+        estGarmin(paquet) -> "garmin"
         else -> paquet
     }
 
