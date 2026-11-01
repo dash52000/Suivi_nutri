@@ -187,12 +187,23 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
             "La bande donne son incertitude à 95 % : elle s'élargit quand tu ne te pèses pas.",
     ) {
         GraphePoids(r.poids, masquerPesee)
+        val c = r.composition
+        if (c != null && !masquerPesee) {
+            Text(
+                "Composition (tendances de la balance) : masse grasse ${nombre(c.graisseKg, 1)} ± " +
+                    "${nombre(Stats.Z975 * c.graisseSe, 1)} kg (${nombre(c.graissePct, 1)} %), masse maigre " +
+                    "${nombre(c.maigreKg, 1)} ± ${nombre(Stats.Z975 * c.maigreSe, 1)} kg.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
     }
 
     Section(
         "Apports estimés",
-        "Dépense moyenne + variation de la tendance du poids × 7 700 kcal/kg, avec un intervalle à 95 % lié aux " +
-            "pesées. Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
+        "Dépense moyenne + énergie stockée ou déstockée. Avec la balance : masse grasse × 9 440 kcal/kg + masse " +
+            "maigre × 1 816 kcal/kg (l'eau et le glycogène ne comptent presque plus comme de la graisse). " +
+            "Sans composition : variation du poids × 7 700 kcal/kg. Intervalle à 95 % lié aux mesures. " +
+            "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
             "fie-toi aux variations d'une semaine à l'autre, pas au chiffre brut.",
     ) {
         if (r.semaines.isEmpty()) {
@@ -207,7 +218,10 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
                 (if (derniere.enCours) "Semaine en cours (${derniere.nbJours} jours) : " else "Semaine du ${derniere.lundi.format(formatCourt)} : ") +
                     "apports ≈ ${nombre(Math.round(derniere.apportsEstimes / 50.0) * 50.0, 0)} kcal/j " +
                     "(${ic(derniere.apports, 0, "kcal/j").replace("+", "")}) pour une dépense de " +
-                    "${nombre(derniere.depenseMoyenne, 0)}.",
+                    "${nombre(derniere.depenseMoyenne, 0)}. Calcul : ${derniere.methode.libelle}" +
+                    (derniere.deltaGraisseKg?.let { g ->
+                        " (graisse ${signe(g, 2, "kg")}, maigre ${signe(derniere.deltaMaigreKg ?: 0.0, 2, "kg")})"
+                    } ?: "") + ".",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

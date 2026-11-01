@@ -7,6 +7,11 @@
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_HISTORY" />
+    <!-- Composition corporelle (balance Withings), facultative -->
+    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+    <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BODY_WATER_MASS" />
+    <uses-permission android:name="android.permission.health.READ_BONE_MASS" />
 
     <!-- Notif du soir, reprogrammée après un redémarrage -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

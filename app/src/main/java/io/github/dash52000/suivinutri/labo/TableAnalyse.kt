@@ -14,7 +14,8 @@ object TableAnalyse {
     private val COLONNES_FIXES = listOf(
         "date", "poids_kg", "poids_heure", "poids_ecartee", "tendance_kg", "tendance_se_kg",
         "pente_kg_semaine", "residu_kg", "kcal_total", "sommeil_min", "minutes_seances", "seance_midi",
-        "longue_sortie",
+        "longue_sortie", "poids_source", "graisse_pct", "masse_grasse_kg", "masse_maigre_kg", "masse_maigre_hc_kg",
+        "eau_kg", "os_kg", "tendance_graisse_kg", "tendance_graisse_se_kg", "tendance_maigre_kg", "tendance_maigre_se_kg",
     )
 
     private fun nombre(x: Double?, decimales: Int): String =
@@ -37,6 +38,7 @@ object TableAnalyse {
             ?: return entete + "\n"
 
         val l = lis
+        val c = Labo.compartiments(jours, aujourdHui)
         val lignes = generateSequence(debut) { it.plusDays(1) }
             .takeWhile { !it.isAfter(aujourdHui) }
             .map { d ->
@@ -64,7 +66,19 @@ object TableAnalyse {
                     j?.minutesSeances?.toString() ?: "NA",
                     booleen(j?.seanceMidi),
                     booleen(j?.longueSortie),
+                    j?.sourcePoids ?: "NA",
+                    nombre(j?.graissePct, 1),
+                    nombre(j?.masseGrasse, 2),
+                    nombre(j?.masseMaigre, 2),
+                    nombre(j?.masseMaigreHcKg, 2),
+                    nombre(j?.eauKg, 2),
+                    nombre(j?.osKg, 2),
                 )
+                val ic = c?.graisse?.index(d)
+                cellules += if (c != null && ic != null) nombre(c.graisse.niveau(ic), 3) else "NA"
+                cellules += if (c != null && ic != null) nombre(sqrt(c.graisse.varNiveau(ic)), 3) else "NA"
+                cellules += if (c != null && ic != null) nombre(c.maigre.niveau(ic), 3) else "NA"
+                cellules += if (c != null && ic != null) nombre(sqrt(c.maigre.varNiveau(ic)), 3) else "NA"
                 idsQuestions.forEach { cellules += e?.reponses?.get(it) ?: "NA" }
                 cellules += if (alcoolRepondu) e!!.boissons.size.toString() else "NA"
                 cellules += if (alcoolRepondu) nombre(e!!.unitesAlcool, 2) else "NA"

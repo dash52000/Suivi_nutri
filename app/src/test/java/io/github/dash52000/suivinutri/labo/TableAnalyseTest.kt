@@ -31,6 +31,7 @@ class TableAnalyseTest {
         assertEquals(4, lignes.size)
         assertEquals("date", entete[0])
         assertTrue(entete.containsAll(listOf("tendance_kg", "tendance_se_kg", "residu_kg", "longue_sortie", "unites_alcool")))
+        assertTrue(entete.containsAll(listOf("poids_source", "graisse_pct", "masse_grasse_kg", "tendance_graisse_kg", "eau_kg")))
 
         fun cellule(ligne: Int, colonne: String) = lignes[ligne].split(",")[entete.indexOf(colonne)]
         assertEquals("88.00", cellule(1, "poids_kg"))

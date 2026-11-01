@@ -47,6 +47,8 @@ sealed interface EtatDonnees {
         val jours: List<Journee>,
         val diagnostic: DiagnosticCalories,
         val historique: Boolean,
+        /** Composition corporelle (balance Withings) pas encore autorisée. */
+        val compositionManquante: Boolean = false,
     ) : EtatDonnees
     data class Erreur(val message: String) : EtatDonnees
 }
@@ -66,6 +68,7 @@ private suspend fun charger(context: Context, health: HealthData, demandeFaite: 
         jours = health.journees(aujourdHui.minusDays(13), aujourdHui),
         diagnostic = health.diagnosticCalories(aujourdHui.minusDays(1)),
         historique = HealthData.PERMISSION_HISTORIQUE in accordees,
+        compositionManquante = !accordees.containsAll(HealthData.PERMISSIONS_COMPOSITION),
     )
 }
 
@@ -128,6 +131,7 @@ fun EcranDonnees(health: HealthData, modifier: Modifier = Modifier) {
                 e,
                 masquerPesee = Affichage.masquerPesee(context),
                 onActualiser = { rafraichir++ },
+                onComposition = { demanderAcces.launch(HealthData.PERMISSIONS_COMPOSITION) },
             )
         }
     }
@@ -146,7 +150,12 @@ private fun Message(titre: String, texte: String, bouton: String?, action: () ->
 }
 
 @Composable
-private fun ListeDonnees(etat: EtatDonnees.Donnees, masquerPesee: Boolean, onActualiser: () -> Unit) {
+private fun ListeDonnees(
+    etat: EtatDonnees.Donnees,
+    masquerPesee: Boolean,
+    onActualiser: () -> Unit,
+    onComposition: () -> Unit,
+) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
         contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
@@ -158,6 +167,19 @@ private fun ListeDonnees(etat: EtatDonnees.Donnees, masquerPesee: Boolean, onAct
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        if (etat.compositionManquante) item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Composition corporelle", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Autorise la lecture de la masse grasse, de la masse maigre, de l'eau et des os envoyées par " +
+                            "ta balance Withings : le labo s'en sert pour estimer tes apports.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onComposition) { Text("Autoriser la composition") }
+                }
+            }
         }
         item { CarteDiagnostic(etat.diagnostic) }
         item {
@@ -219,6 +241,17 @@ private fun CarteJour(j: Journee, masquerPesee: Boolean) {
                 ).joinToString("  ·  "),
                 style = MaterialTheme.typography.bodyMedium,
             )
+            if (!masquerPesee && (j.graissePct != null || j.eauKg != null)) {
+                Text(
+                    listOfNotNull(
+                        j.graissePct?.let { String.format(Locale.FRENCH, "Graisse %.1f %%", it) },
+                        j.masseMaigreKg?.let { String.format(Locale.FRENCH, "maigre %.1f kg", it) },
+                        j.eauKg?.let { String.format(Locale.FRENCH, "eau %.1f kg", it) },
+                        j.poidsSource?.let { "($it)" },
+                    ).joinToString("  ·  "),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             j.activites.forEach { a ->
                 Text(
                     "${a.debut.format(formatHeure)}  ${a.type} · ${a.dureeMin} min",

@@ -74,10 +74,34 @@ class LaboTest {
         val r = Labo.analyser(jours, lundi.plusDays(70))
         val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
         assertFalse(s5.enCours)
+        assertEquals(Methode.POIDS, s5.methode)
         assertEquals(2500.0, s5.depenseMoyenne, 1e-9)
         assertEquals(1725.39, s5.apportsEstimes, 0.05)
         // Écart-type de référence 135,409 kcal/j : demi-largeur de l'IC = 1,96 × 135,409.
         assertEquals(1.959964 * 135.409, (s5.apports.haut - s5.apports.bas) / 2, 0.05)
+    }
+
+    /**
+     * Graisse −0,05 kg/j et maigre −0,015 kg/j, dépense 2 500 : bilan vrai 2 500 − (9 440 × 0,35 + 1 816 × 0,105) ÷ 7
+     * ≈ 2 000,8 kcal/j. Référence numpy (mêmes paramètres de lissage) : 2 001,256, écart-type 98,738.
+     */
+    @Test
+    fun apportsParCompartiments() {
+        val lundi = LocalDate.of(2026, 8, 3)
+        val jours = (0L until 71L).map { k ->
+            val fm = 22 - 0.05 * k
+            val ffm = 66 - 0.015 * k
+            JourLabo(date = lundi.plusDays(k), poids = fm + ffm, graissePct = 100 * fm / (fm + ffm), kcal = 2500.0)
+        }
+        val r = Labo.analyser(jours, lundi.plusDays(70))
+        val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
+        assertEquals(Methode.COMPOSITION, s5.methode)
+        assertEquals(-0.349602, s5.deltaGraisseKg!!, 1e-5)
+        assertEquals(-0.105158, s5.deltaMaigreKg!!, 1e-5)
+        assertEquals(2001.256, s5.apportsEstimes, 0.01)
+        assertEquals(1.959964 * 98.7379, (s5.apports.haut - s5.apports.bas) / 2, 0.01)
+        assertNotNull(r.composition)
+        assertEquals(25.0, 100 * 22 / 88.0, 1e-9)
     }
 
     @Test

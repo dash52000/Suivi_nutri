@@ -28,7 +28,15 @@ jour qui s'installe par-dessus l'appli existante.
   Bruit de pesée (0,6 kg)² le matin, (1,2 kg)² l'après-midi ; bruit du niveau (0,05 kg/j)²,
   de la pente (0,005 kg/j par jour)². Pesée écartée si elle tombe à plus de 4 écarts-types de
   la prévision. Le lisseur (Rauch-Tung-Striebel) n'a pas de retard et donne une bande d'incertitude.
-- **Apports estimés** : dépense moyenne + Δ niveau lissé (lundi matin → lundi matin) × 7 700 ÷ 7,
+- **Composition** (balance Withings via Health Connect, pesée Withings préférée aux saisies manuelles) :
+  masse grasse = poids × taux de graisse, masse maigre = poids − masse grasse, chacune lissée par son
+  propre Kalman (bruit de mesure (0,7 kg)² et (0,77 kg)², graisse peu souple, maigre souple : elle porte
+  l'eau et le glycogène).
+- **Apports estimés avec la composition** (dès 3 mesures dans la semaine) : dépense moyenne +
+  (9 440 × Δ masse grasse + 1 816 × Δ masse maigre) ÷ jours, densités de Kevin Hall (2008) ; variance =
+  somme des deux variances (compartiments supposés indépendants, à vérifier en R). En simulation avec
+  de l'eau transitoire et une bio-impédance bruitée, l'erreur passe d'environ 106 à 46-70 kcal/j.
+- **Apports estimés sans composition** : dépense moyenne + Δ niveau lissé (lundi matin → lundi matin) × 7 700 ÷ 7,
   avec IC 95 % tiré de la covariance a posteriori des deux niveaux (covariance croisée du lisseur).
   Semaine complète : ≥ 3 pesées retenues et ≥ 5 jours de dépense. Semaine en cours dès 2 jours écoulés.
   Niveau absolu probablement surestimé (dépense de la montre) : seules les variations comptent.
@@ -49,9 +57,10 @@ contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et
 
 ## Export pour l'analyse R
 
-Réglages > Exporter pour R : une ligne par jour (`read.csv`), avec pesée et heure, pesée écartée,
+Réglages > Exporter pour R : une ligne par jour (`read.csv`), avec pesée, heure et source, pesée écartée,
 tendance et son écart-type, pente (kg/semaine), résidu, dépense, sommeil, minutes de séance, séance du
-midi, longue sortie, toutes les réponses, nombre de boissons et unités d'alcool.
+midi, longue sortie, composition (taux de graisse, masses grasse et maigre, masse maigre Health Connect,
+eau, os) et leurs tendances, toutes les réponses, nombre de boissons et unités d'alcool.
 
 ## Feuille de route
 
@@ -68,6 +77,8 @@ midi, longue sortie, toutes les réponses, nombre de boissons et unités d'alcoo
 - **v1.5** : tendance de Kalman avec bande d'incertitude, apports avec IC et semaine en cours,
   régression jointe du lendemain (dont les longues sorties), correction de Benjamini-Hochberg,
   pesées pondérées (après-midi, aberrantes, doublons), export journalier complet pour R
+- **v1.6** : balance Withings (pesée préférée, composition lue), apports par compartiments graisse / maigre,
+  composition dans l'export
 - **Avant la v2, obligatoire** : une analyse en R sur l'export (validation des paramètres du Kalman,
   des effets estimés et des réflexes à garder, à partir du journal d'utilisation). La suite n'est
   lancée qu'au vu de ses conclusions.

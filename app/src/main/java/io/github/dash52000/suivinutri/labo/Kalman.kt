@@ -39,8 +39,31 @@ object Kalman {
 
     data class Pesee(val jour: Int, val poids: Double, val variance: Double)
 
-    fun variancePesee(heure: Int?): Double =
-        if (heure != null && heure >= HEURE_APRES_MIDI) VAR_APRES_MIDI else VAR_MATIN
+    /** Bruits du modèle pour une série donnée (poids, masse grasse ou masse maigre). */
+    data class Parametres(
+        val varMatin: Double,
+        val varApresMidi: Double,
+        val qNiveau: Double,
+        val qPente: Double,
+        val varNiveauInitiale: Double = VAR_NIVEAU_INITIALE,
+        val varPenteInitiale: Double = VAR_PENTE_INITIALE,
+    ) {
+        fun variance(heure: Int?): Double =
+            if (heure != null && heure >= HEURE_APRES_MIDI) varApresMidi else varMatin
+    }
+
+    val POIDS = Parametres(VAR_MATIN, VAR_APRES_MIDI, Q_NIVEAU, Q_PENTE)
+
+    /**
+     * Masse grasse (poids × taux de graisse de la balance) : bruit de bio-impédance (0,7 kg)², la graisse
+     * bouge lentement : niveau (0,02 kg/j)², pente (0,002 kg/j par jour)².
+     */
+    val GRAISSE = Parametres(0.49, 1.96, 0.0004, 4e-6)
+
+    /** Masse maigre (poids − masse grasse) : elle porte l'eau et le glycogène, donc plus souple. */
+    val MAIGRE = Parametres(0.6, 2.4, 0.01, 1e-5)
+
+    fun variancePesee(heure: Int?): Double = POIDS.variance(heure)
 
     /** Matrices 2 × 2 stockées [a, b, c, d] pour [[a, b], [c, d]]. */
     private fun mul(x: DoubleArray, y: DoubleArray) = doubleArrayOf(
@@ -58,7 +81,6 @@ object Kalman {
 
     private val F = doubleArrayOf(1.0, 1.0, 0.0, 1.0)
     private val FT = transposee(F)
-    private val Q = doubleArrayOf(Q_NIVEAU, 0.0, 0.0, Q_PENTE)
 
     /** Résultat du lissage, jour par jour à partir de [debut]. */
     class Lissage internal constructor(
@@ -98,8 +120,9 @@ object Kalman {
      * [n] jours à partir de [debut] ; la première pesée doit tomber le jour 0.
      * Plusieurs pesées le même jour sont intégrées l'une après l'autre.
      */
-    fun lisser(debut: LocalDate, n: Int, pesees: List<Pesee>): Lissage {
+    fun lisser(debut: LocalDate, n: Int, pesees: List<Pesee>, parametres: Parametres = POIDS): Lissage {
         require(n >= 1 && pesees.isNotEmpty())
+        val q = doubleArrayOf(parametres.qNiveau, 0.0, 0.0, parametres.qPente)
         val parJour = pesees.groupBy { it.jour }
         require(pesees.minOf { it.jour } == 0)
 
@@ -110,11 +133,11 @@ object Kalman {
         val ecartees = mutableSetOf<Int>()
 
         var x = doubleArrayOf(parJour.getValue(0).first().poids, 0.0)
-        var p = doubleArrayOf(VAR_NIVEAU_INITIALE, 0.0, 0.0, VAR_PENTE_INITIALE)
+        var p = doubleArrayOf(parametres.varNiveauInitiale, 0.0, 0.0, parametres.varPenteInitiale)
         for (t in 0 until n) {
             if (t > 0) {
                 x = doubleArrayOf(x[0] + x[1], x[1])
-                p = plus(mul(mul(F, p), FT), Q)
+                p = plus(mul(mul(F, p), FT), q)
             }
             xp[t] = x
             pp[t] = p

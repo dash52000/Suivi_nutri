@@ -21,7 +21,36 @@ data class JourLabo(
     /** Séance d'endurance d'au moins [Labo.LONGUE_SORTIE_MIN] minutes ; null si Health Connect n'a rien lu. */
     val longueSortie: Boolean? = null,
     val minutesSeances: Long? = null,
-)
+    /** Composition de la balance (bio-impédance) : taux de graisse en %, masses en kg. */
+    val graissePct: Double? = null,
+    val masseMaigreHcKg: Double? = null,
+    val eauKg: Double? = null,
+    val osKg: Double? = null,
+    val sourcePoids: String? = null,
+) {
+    /** Masse grasse du jour : poids × taux de graisse. */
+    val masseGrasse: Double? get() = if (poids != null && graissePct != null) poids * graissePct / 100 else null
+
+    /** Masse maigre du jour : poids − masse grasse (eau, muscle, glycogène, os). */
+    val masseMaigre: Double? get() = masseGrasse?.let { poids!! - it }
+}
+
+/** Comment les apports d'une semaine ont été estimés. */
+enum class Methode(val libelle: String) {
+    POIDS("variation du poids × 7 700 kcal/kg"),
+    COMPOSITION("masse grasse × 9 440 + masse maigre × 1 816 kcal/kg"),
+}
+
+/** Tendances de la composition au dernier jour. */
+data class ResumeComposition(
+    val date: LocalDate,
+    val graisseKg: Double,
+    val graisseSe: Double,
+    val maigreKg: Double,
+    val maigreSe: Double,
+) {
+    val graissePct: Double get() = 100 * graisseKg / (graisseKg + maigreKg)
+}
 
 data class PointPoids(
     val date: LocalDate,
@@ -46,6 +75,9 @@ data class SemaineApports(
     val nbJoursDepense: Int,
     val enCours: Boolean,
     val nbJours: Int,
+    val methode: Methode = Methode.POIDS,
+    val deltaGraisseKg: Double? = null,
+    val deltaMaigreKg: Double? = null,
 ) {
     val apportsEstimes: Double get() = apports.estimation
 }
@@ -101,6 +133,7 @@ data class LigneCalendrier(val libelle: String, val scores: List<Double?>) {
 
 data class ResultatLabo(
     val poids: List<PointPoids>,
+    val composition: ResumeComposition? = null,
     val semaines: List<SemaineApports>,
     val lendemain: List<EffetLendemain>,
     val effetsSemaine: List<EffetSemaine>,
@@ -111,6 +144,11 @@ data class ResultatLabo(
 object Labo {
 
     const val KCAL_PAR_KG = 7700.0
+
+    /** Densités énergétiques de Kevin Hall (2008) : 39,5 MJ/kg de graisse, 7,6 MJ/kg de masse maigre. */
+    const val KCAL_PAR_KG_GRAISSE = 9440.0
+    const val KCAL_PAR_KG_MAIGRE = 1816.0
+    const val MIN_MESURES_COMPOSITION = 3
     const val MIN_GROUPE = 5
     const val MIN_SEMAINES = 8
     const val NUIT_COURTE_MIN = 390L
@@ -207,6 +245,24 @@ object Labo {
         return Kalman.lisser(debut, n, mesures)
     }
 
+    /** Lissages de la masse grasse et de la masse maigre, sur la même grille de jours. */
+    class Compartiments(val graisse: Kalman.Lissage, val maigre: Kalman.Lissage)
+
+    /** Null tant qu'il y a moins de [MIN_MESURES_COMPOSITION] jours avec poids et taux de graisse. */
+    fun compartiments(jours: List<JourLabo>, aujourdHui: LocalDate): Compartiments? {
+        val mesures = jours.filter { it.masseGrasse != null }.sortedBy { it.date }
+        if (mesures.size < MIN_MESURES_COMPOSITION) return null
+        val debut = mesures.first().date
+        val n = ChronoUnit.DAYS.between(debut, maxOf(aujourdHui, mesures.last().date)).toInt() + 1
+        fun jour(j: JourLabo) = ChronoUnit.DAYS.between(debut, j.date).toInt()
+        val graisse = mesures.map { Kalman.Pesee(jour(it), it.masseGrasse!!, Kalman.GRAISSE.variance(it.heurePesee)) }
+        val maigre = mesures.map { Kalman.Pesee(jour(it), it.masseMaigre!!, Kalman.MAIGRE.variance(it.heurePesee)) }
+        return Compartiments(
+            Kalman.lisser(debut, n, graisse, Kalman.GRAISSE),
+            Kalman.lisser(debut, n, maigre, Kalman.MAIGRE),
+        )
+    }
+
     // ---------- Analyse complète ----------
 
     /**
@@ -241,7 +297,18 @@ object Labo {
                 .toList()
         }
 
-        val semaines = if (lis == null) emptyList() else semaines(parDate, lis, aujourdHui)
+        val comp = compartiments(tries, aujourdHui)
+        val resume = comp?.let { c ->
+            val i = c.graisse.index(aujourdHui) ?: return@let null
+            ResumeComposition(
+                date = aujourdHui,
+                graisseKg = c.graisse.niveau(i),
+                graisseSe = sqrt(c.graisse.varNiveau(i)),
+                maigreKg = c.maigre.niveau(i),
+                maigreSe = sqrt(c.maigre.varNiveau(i)),
+            )
+        }
+        val semaines = if (lis == null) emptyList() else semaines(parDate, lis, comp, aujourdHui)
         val lendemain = lendemain(tries, parDate, lis)
         val effetsSemaine = effetsSemaine(parDate, semaines.filter { !it.enCours }, reflexes + reflexesPerso)
         val croises = croises(tries, parDate)
@@ -254,6 +321,7 @@ object Labo {
 
         return ResultatLabo(
             poids = poids,
+            composition = resume,
             semaines = semaines.sortedByDescending { it.lundi },
             lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
             effetsSemaine = effetsSemaine.map { e -> if (e.effet?.p != null) e.copy(q = q.next()) else e },
@@ -270,6 +338,7 @@ object Labo {
     private fun semaines(
         parDate: Map<LocalDate, JourLabo>,
         lis: Kalman.Lissage,
+        comp: Compartiments?,
         aujourdHui: LocalDate,
     ): List<SemaineApports> {
         val resultat = mutableListOf<SemaineApports>()
@@ -285,9 +354,30 @@ object Labo {
             val kcal = periode.mapNotNull { parDate[it]?.kcal }.filter { it >= KCAL_JOUR_MIN }
             if (pesees < minPesees || kcal.size < minDepense) return
             val delta = lis.niveau(i + jours) - lis.niveau(i)
-            val parKg = KCAL_PAR_KG / jours
-            val estimation = kcal.average() + delta * parKg
-            val se = sqrt(lis.varDifference(i, jours)) * parKg
+
+            // Par compartiments si la balance a donné assez de mesures sur la période, sinon par le poids.
+            val ic = comp?.graisse?.index(lundi)
+            val mesuresCompo = joursPesees.count { parDate[it]?.masseGrasse != null }
+            val parCompo = comp != null && ic != null && ic + jours < comp.graisse.n && mesuresCompo >= minPesees
+            val estimation: Double
+            val se: Double
+            var dGraisse: Double? = null
+            var dMaigre: Double? = null
+            if (parCompo) {
+                val g = comp!!.graisse
+                val m = comp.maigre
+                dGraisse = g.niveau(ic!! + jours) - g.niveau(ic)
+                dMaigre = m.niveau(ic + jours) - m.niveau(ic)
+                estimation = kcal.average() + (KCAL_PAR_KG_GRAISSE * dGraisse + KCAL_PAR_KG_MAIGRE * dMaigre) / jours
+                se = sqrt(
+                    KCAL_PAR_KG_GRAISSE * KCAL_PAR_KG_GRAISSE * g.varDifference(ic, jours) +
+                        KCAL_PAR_KG_MAIGRE * KCAL_PAR_KG_MAIGRE * m.varDifference(ic, jours)
+                ) / jours
+            } else {
+                val parKg = KCAL_PAR_KG / jours
+                estimation = kcal.average() + delta * parKg
+                se = sqrt(lis.varDifference(i, jours)) * parKg
+            }
             resultat += SemaineApports(
                 lundi = lundi,
                 depenseMoyenne = kcal.average(),
@@ -297,6 +387,9 @@ object Labo {
                 nbJoursDepense = kcal.size,
                 enCours = enCours,
                 nbJours = jours,
+                methode = if (parCompo) Methode.COMPOSITION else Methode.POIDS,
+                deltaGraisseKg = dGraisse,
+                deltaMaigreKg = dMaigre,
             )
         }
 

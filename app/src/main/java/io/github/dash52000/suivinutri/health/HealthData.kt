@@ -4,7 +4,11 @@ import android.content.Context
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.BodyFatRecord
+import androidx.health.connect.client.records.BodyWaterMassRecord
+import androidx.health.connect.client.records.BoneMassRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
@@ -32,11 +36,18 @@ data class Activite(
 data class Journee(
     val date: LocalDate,
     val poidsKg: Double?,
-    /** Heure locale de la pesée retenue (la première du jour). */
+    /** Heure locale de la pesée retenue (Withings en priorité, sinon la première du jour). */
     val poidsHeure: Int? = null,
     val kcalTotal: Double?,
     val sommeilMin: Long?,
     val activites: List<Activite>,
+    /** Source de la pesée retenue : withings, garmin… */
+    val poidsSource: String? = null,
+    /** Composition de la balance (bio-impédance), mesure retenue du jour. */
+    val graissePct: Double? = null,
+    val masseMaigreKg: Double? = null,
+    val eauKg: Double? = null,
+    val osKg: Double? = null,
 )
 
 /**
@@ -69,6 +80,14 @@ class HealthData(context: Context) {
 
         val PERMISSION_HISTORIQUE: String = HealthPermission.PERMISSION_READ_HEALTH_DATA_HISTORY
 
+        /** Composition corporelle (balance Withings) : facultative, l'appli fonctionne sans. */
+        val PERMISSIONS_COMPOSITION: Set<String> = setOf(
+            HealthPermission.getReadPermission(BodyFatRecord::class),
+            HealthPermission.getReadPermission(LeanBodyMassRecord::class),
+            HealthPermission.getReadPermission(BodyWaterMassRecord::class),
+            HealthPermission.getReadPermission(BoneMassRecord::class),
+        )
+
         fun statut(context: Context): Int = HealthConnectClient.getSdkStatus(context)
     }
 
@@ -78,7 +97,7 @@ class HealthData(context: Context) {
             HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
 
     suspend fun permissionsADemander(): Set<String> =
-        if (historiqueDisponible()) PERMISSIONS_BASE + PERMISSION_HISTORIQUE else PERMISSIONS_BASE
+        PERMISSIONS_BASE + PERMISSIONS_COMPOSITION + if (historiqueDisponible()) setOf(PERMISSION_HISTORIQUE) else emptySet()
 
     suspend fun permissionsAccordees(): Set<String> =
         client.permissionController.getGrantedPermissions()
@@ -151,10 +170,40 @@ class HealthData(context: Context) {
         val t0 = debut.debutInstant()
         val t1 = fin.plusDays(1).debutInstant()
 
-        // Poids : la première pesée du jour (le matin, à jeun, en principe). Les doublons disparaissent avec.
+        // Poids : la balance Withings en priorité, sinon la première pesée du jour.
         val poids = lireTout<WeightRecord>(t0, t1)
             .groupBy { it.time.atZone(zone).toLocalDate() }
-            .mapValues { (_, pesees) -> pesees.minBy { it.time } }
+            .mapValues { (_, pesees) -> Sources.preferer(pesees, { it.metadata.dataOrigin.packageName }, { it.time })!! }
+
+        // Composition : seulement si l'accès a été accordé (facultatif).
+        val accordees = permissionsAccordees()
+        suspend fun <T> parJour(
+            permission: String,
+            lire: suspend () -> List<T>,
+            instant: (T) -> Instant,
+            paquet: (T) -> String,
+        ): Map<LocalDate, T> =
+            if (permission !in accordees) emptyMap()
+            else lire()
+                .groupBy { instant(it).atZone(zone).toLocalDate() }
+                .mapValues { (_, mesures) -> Sources.preferer(mesures, paquet, instant)!! }
+
+        val graisse = parJour(
+            HealthPermission.getReadPermission(BodyFatRecord::class),
+            { lireTout<BodyFatRecord>(t0, t1) }, { it.time }, { it.metadata.dataOrigin.packageName },
+        )
+        val maigre = parJour(
+            HealthPermission.getReadPermission(LeanBodyMassRecord::class),
+            { lireTout<LeanBodyMassRecord>(t0, t1) }, { it.time }, { it.metadata.dataOrigin.packageName },
+        )
+        val eau = parJour(
+            HealthPermission.getReadPermission(BodyWaterMassRecord::class),
+            { lireTout<BodyWaterMassRecord>(t0, t1) }, { it.time }, { it.metadata.dataOrigin.packageName },
+        )
+        val os = parJour(
+            HealthPermission.getReadPermission(BoneMassRecord::class),
+            { lireTout<BoneMassRecord>(t0, t1) }, { it.time }, { it.metadata.dataOrigin.packageName },
+        )
 
         // Sommeil : rattaché au jour du réveil.
         val sommeil = lireTout<SleepSessionRecord>(t0.minus(Duration.ofHours(12)), t1)
@@ -181,6 +230,11 @@ class HealthData(context: Context) {
                     date = jour,
                     poidsKg = poids[jour]?.weight?.inKilograms,
                     poidsHeure = poids[jour]?.time?.atZone(zone)?.hour,
+                    poidsSource = poids[jour]?.metadata?.dataOrigin?.packageName?.let { Sources.libelle(it) },
+                    graissePct = graisse[jour]?.percentage?.value,
+                    masseMaigreKg = maigre[jour]?.mass?.inKilograms,
+                    eauKg = eau[jour]?.mass?.inKilograms,
+                    osKg = os[jour]?.mass?.inKilograms,
                     kcalTotal = kcal[jour],
                     sommeilMin = sommeil[jour],
                     activites = activites[jour].orEmpty().sortedBy { it.debut },
