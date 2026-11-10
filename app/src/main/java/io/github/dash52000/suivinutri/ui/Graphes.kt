@@ -26,13 +26,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import io.github.dash52000.suivinutri.labo.ApportsGlissants
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.Intervalle
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.SemaineApports
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 import kotlin.math.abs
 
 /** Couleurs des graphes, tirées du thème (clair ou sombre). Jamais de rouge : de l'info, pas un verdict. */
@@ -65,77 +63,7 @@ private fun Legende(texte: String, couleur: Color) {
     Text(texte, style = MaterialTheme.typography.labelSmall, color = couleur)
 }
 
-// ---------- Apports estimés et dépense, 7 jours glissants ----------
-
-/** Un point par matin : apports des 7 jours précédents, bande de l'IC à 95 %, dépense moyenne en trait fin. */
-@Composable
-fun GrapheGlissants(points: List<ApportsGlissants>) {
-    if (points.size < 2) return
-    val p = palette()
-    val valeurs = points.flatMap { listOf(it.depenseMoyenne, it.apports.bas, it.apports.haut) }
-    val min = valeurs.min() - 100
-    val max = valeurs.max() + 100
-    val debut = points.first().fin
-    val fin = points.last().fin
-    val etendue = maxOf(1L, ChronoUnit.DAYS.between(debut, fin)).toFloat()
-    // Morceaux de jours consécutifs : pas de trait à travers un trou de données.
-    val morceaux = mutableListOf<MutableList<ApportsGlissants>>()
-    points.forEach { a ->
-        val precedent = morceaux.lastOrNull()?.last()
-        if (precedent != null && ChronoUnit.DAYS.between(precedent.fin, a.fin) == 1L) morceaux.last() += a
-        else morceaux += mutableListOf(a)
-    }
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Legende("— Apports (bande : IC 95 %)", p.principale)
-                Legende("— Dépense", p.attenuee)
-            }
-            Text("${nombre(max, 0)} kcal/j", style = MaterialTheme.typography.labelSmall)
-            Canvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(170.dp)
-                    .clipToBounds(),
-            ) {
-                fun x(d: LocalDate) = size.width * ChronoUnit.DAYS.between(debut, d) / etendue
-                fun y(v: Double) = (size.height * (max - v) / (max - min)).toFloat()
-                morceaux.forEach { m ->
-                    if (m.size == 1) {
-                        val a = m[0]
-                        val cx = x(a.fin)
-                        drawLine(
-                            p.principale.copy(alpha = 0.3f), Offset(cx, y(a.apports.bas)), Offset(cx, y(a.apports.haut)),
-                            strokeWidth = 2.dp.toPx(),
-                        )
-                        drawCircle(p.attenuee, 2.dp.toPx(), Offset(cx, y(a.depenseMoyenne)))
-                        drawCircle(p.principale, 3.dp.toPx(), Offset(cx, y(a.apports.estimation)))
-                        return@forEach
-                    }
-                    val bande = Path()
-                    m.forEachIndexed { i, a ->
-                        if (i == 0) bande.moveTo(x(a.fin), y(a.apports.haut)) else bande.lineTo(x(a.fin), y(a.apports.haut))
-                    }
-                    m.asReversed().forEach { a -> bande.lineTo(x(a.fin), y(a.apports.bas)) }
-                    bande.close()
-                    drawPath(bande, p.principale.copy(alpha = 0.15f))
-                    fun ligne(v: (ApportsGlissants) -> Double) = Path().apply {
-                        m.forEachIndexed { i, a -> if (i == 0) moveTo(x(a.fin), y(v(a))) else lineTo(x(a.fin), y(v(a))) }
-                    }
-                    drawPath(ligne { it.depenseMoyenne }, p.attenuee, style = Stroke(width = 1.5.dp.toPx()))
-                    drawPath(ligne { it.apports.estimation }, p.principale, style = Stroke(width = 2.5.dp.toPx()))
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${nombre(min, 0)} kcal/j · ${debut.format(formatCourt)}", style = MaterialTheme.typography.labelSmall)
-                Text(fin.format(formatCourt), style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}
-
-// ---------- Apports estimés et dépense, par semaine ----------
+// ---------- Apports estimés et dépense, par blocs de 7 jours ----------
 
 @Composable
 fun GrapheSemaines(semaines: List<SemaineApports>) {
@@ -154,7 +82,6 @@ fun GrapheSemaines(semaines: List<SemaineApports>) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Legende("● Apports (barre : IC 95 %)", p.principale)
-                Legende("○ En cours", p.principale)
                 Legende("● Dépense", p.attenuee)
             }
             Text("${nombre(max, 0)} kcal/j", style = MaterialTheme.typography.labelSmall)
@@ -194,11 +121,12 @@ fun GrapheSemaines(semaines: List<SemaineApports>) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "${nombre(min, 0)} kcal/j · sem. du ${serie.first().lundi.format(formatCourt)}",
+                    "${nombre(min, 0)} kcal/j · du ${serie.first().lundi.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Text(
-                    if (serie.last().enCours) "en cours" else "sem. du ${serie.last().lundi.format(formatCourt)}",
+                    if (serie.last().lundi == LocalDate.now().minusDays(7)) "7 derniers jours"
+                    else "du ${serie.last().lundi.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }

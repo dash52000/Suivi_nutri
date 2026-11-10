@@ -180,21 +180,22 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
             "maigre × 1 816 kcal/kg (l'eau et le glycogène ne comptent presque plus comme de la graisse). " +
             "Sans composition : variation du poids × 7 700 kcal/kg. Intervalle à 95 % lié aux mesures. " +
             "Les jours sans montre (ni sommeil ni séance, moins de 2 000 kcal) sont écartés de la dépense. " +
-            "Chaque point de la courbe couvre les 7 jours qui précèdent ce matin-là (pesée de J − 7 → pesée " +
-            "de J) : deux points voisins partagent 6 jours, la courbe est lisse par construction. " +
+            "Chaque barre couvre 7 jours, la dernière les 7 derniers jours (pesée d'il y a 7 jours → pesée de " +
+            "ce matin), les précédentes les 7 jours d'avant, et ainsi de suite. " +
             "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
             "fie-toi aux variations, pas au chiffre brut.",
     ) {
-        if (r.glissants.isEmpty()) {
+        if (r.blocs.isEmpty()) {
             Ligne(
                 "Pas encore assez de données : il faut au moins 3 pesées et 5 jours de dépense avec la montre " +
                     "sur les 7 derniers jours."
             )
         } else {
-            GrapheGlissants(r.glissants)
-            val derniere = r.glissants.last()
+            GrapheSemaines(r.blocs)
+            val derniere = r.blocs.last()
             Text(
-                (if (derniere.fin == etat.dates28.last()) "7 derniers jours : " else "7 jours jusqu'au ${derniere.fin.format(formatCourt)} : ") +
+                (if (derniere.lundi == etat.dates28.last().minusDays(7)) "7 derniers jours : "
+                else "7 jours du ${derniere.lundi.format(formatCourt)} : ") +
                     "apports ≈ ${nombre(Math.round(derniere.apports.estimation / 50.0) * 50.0, 0)} kcal/j " +
                     "(${ic(derniere.apports, 0, "kcal/j").replace("+", "")}) pour une dépense de " +
                     "${nombre(derniere.depenseMoyenne, 0)}. Calcul : ${derniere.methode.libelle}" +

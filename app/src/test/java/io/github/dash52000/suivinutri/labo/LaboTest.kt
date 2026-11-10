@@ -81,17 +81,16 @@ class LaboTest {
         // Écart-type de référence 135,409 kcal/j : demi-largeur de l'IC = 1,96 × 135,409.
         assertEquals(1.959964 * 135.409, (s5.apports.haut - s5.apports.bas) / 2, 0.05)
 
-        // 7 jours glissants : un point par matin dès J7, et celui du lundi qui clôt la semaine 5 la reproduit.
-        assertEquals(64, r.glissants.size)
-        assertEquals(lundi.plusDays(7), r.glissants.first().fin)
-        assertEquals(lundi.plusDays(70), r.glissants.last().fin)
-        val lundi6 = r.glissants.first { it.fin == lundi.plusWeeks(6) }
-        assertEquals(s5.apports.estimation, lundi6.apports.estimation, 1e-9)
-        assertEquals(s5.apports.haut, lundi6.apports.haut, 1e-9)
-        assertEquals(s5.depenseMoyenne, lundi6.depenseMoyenne, 1e-9)
-        // Référence numpy : premiers points tirés par le démarrage du lisseur (1 810), puis 1 725,1 à 1 728,6.
-        assertTrue(r.glissants.drop(21).all { it.apports.estimation in 1725.0..1728.7 })
-        assertEquals(1728.567, r.glissants.last().apports.estimation, 0.01)
+        // Blocs de 7 jours alignés sur aujourd'hui (J70) : fins J70, J63… J7, soit 10 blocs ; celui qui commence le
+        // lundi de la semaine 5 la reproduit. Références numpy : dernier bloc 1 728,567, premier 1 810,0.
+        assertEquals(10, r.blocs.size)
+        assertEquals(lundi.plusDays(63), r.blocs.last().lundi)
+        assertEquals(lundi, r.blocs.first().lundi)
+        val bloc5 = r.blocs.first { it.lundi == lundi.plusWeeks(5) }
+        assertEquals(s5.apports.estimation, bloc5.apports.estimation, 1e-9)
+        assertEquals(s5.apports.haut, bloc5.apports.haut, 1e-9)
+        assertEquals(1728.567, r.blocs.last().apports.estimation, 0.01)
+        assertEquals(1810.0, r.blocs.first().apports.estimation, 0.1)
     }
 
     /**
