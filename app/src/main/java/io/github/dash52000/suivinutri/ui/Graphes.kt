@@ -63,7 +63,7 @@ private fun Legende(texte: String, couleur: Color) {
     Text(texte, style = MaterialTheme.typography.labelSmall, color = couleur)
 }
 
-// ---------- Apports estimés et dépense, par blocs de 7 jours ----------
+// ---------- Apports estimés et dépense : semaines complètes, puis les 7 derniers jours ----------
 
 @Composable
 fun GrapheSemaines(semaines: List<SemaineApports>) {
@@ -82,6 +82,7 @@ fun GrapheSemaines(semaines: List<SemaineApports>) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Legende("● Apports (barre : IC 95 %)", p.principale)
+                if (serie.last().enCours) Legende("○ 7 derniers jours", p.principale)
                 Legende("● Dépense", p.attenuee)
             }
             Text("${nombre(max, 0)} kcal/j", style = MaterialTheme.typography.labelSmall)
@@ -121,12 +122,11 @@ fun GrapheSemaines(semaines: List<SemaineApports>) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "${nombre(min, 0)} kcal/j · du ${serie.first().lundi.format(formatCourt)}",
+                    "${nombre(min, 0)} kcal/j · sem. du ${serie.first().lundi.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Text(
-                    if (serie.last().lundi == LocalDate.now().minusDays(7)) "7 derniers jours"
-                    else "du ${serie.last().lundi.format(formatCourt)}",
+                    if (serie.last().enCours) "7 derniers jours" else "sem. du ${serie.last().lundi.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }

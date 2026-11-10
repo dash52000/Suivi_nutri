@@ -146,10 +146,10 @@ data class ResultatLabo(
     val composition: ResumeComposition? = null,
     val semaines: List<SemaineApports>,
     /**
-     * Blocs de 7 jours qui finissent ce matin, il y a 7 jours, il y a 14 jours… (du plus ancien au plus récent ;
-     * [SemaineApports.lundi] = premier jour du bloc). Le dernier = les 7 derniers jours.
+     * Les 7 derniers jours : pesée d'il y a 7 jours → pesée de ce matin ([SemaineApports.lundi] = premier jour,
+     * [SemaineApports.enCours] = vrai). Null sans assez de données.
      */
-    val blocs: List<SemaineApports> = emptyList(),
+    val septDerniersJours: SemaineApports? = null,
     val lendemain: List<EffetLendemain>,
     val effetsSemaine: List<EffetSemaine>,
     val croises: List<EffetCroise>,
@@ -179,9 +179,6 @@ object Labo {
 
     /** Profondeur du graphe du poids. */
     const val JOURS_AFFICHES = 90L
-
-    /** Nombre de blocs de 7 jours du graphe des apports. */
-    const val NB_BLOCS = 12L
 
     /**
      * Sans sommeil ni séance, une journée sous 2 000 kcal est une journée sans montre : Garmin n'y compte que
@@ -419,7 +416,7 @@ object Labo {
             )
         }
         val semaines = if (lis == null) emptyList() else semaines(parDate, lis, comp, aujourdHui)
-        val blocs = if (lis == null) emptyList() else blocs(parDate, lis, comp, aujourdHui)
+        val septDerniersJours = if (lis == null) null else septDerniersJours(parDate, lis, comp, aujourdHui)
         val lendemain = lendemain(tries, parDate, lis)
         val effetsSemaine = effetsSemaine(parDate, semaines.filter { !it.enCours }, reflexes + reflexesPerso)
         val croises = croises(tries, parDate)
@@ -434,7 +431,7 @@ object Labo {
             poids = poids,
             composition = resume,
             semaines = semaines.sortedByDescending { it.lundi },
-            blocs = blocs,
+            septDerniersJours = septDerniersJours,
             lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
             effetsSemaine = effetsSemaine.map { e -> if (e.effet?.p != null) e.copy(q = q.next()) else e },
             croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
@@ -541,21 +538,19 @@ object Labo {
     }
 
     /**
-     * Blocs de 7 jours alignés sur aujourd'hui, sans chevauchement : de la pesée de J − 7 à celle de J (comprises),
-     * dépense de J − 7 à J − 1, pour J = aujourd'hui, aujourd'hui − 7… sur [NB_BLOCS] blocs. Mêmes minimums
-     * qu'une semaine complète ; un bloc qui ne les atteint pas est sauté.
+     * Les 7 derniers jours : de la pesée d'il y a 7 jours à celle de ce matin (comprises), dépense des 7 jours
+     * précédant aujourd'hui. Mêmes minimums qu'une semaine complète.
      */
-    private fun blocs(
+    private fun septDerniersJours(
         parDate: Map<LocalDate, JourLabo>,
         lis: Kalman.Lissage,
         comp: Compartiments?,
         aujourdHui: LocalDate,
-    ): List<SemaineApports> =
-        (NB_BLOCS - 1L downTo 0L).mapNotNull { k ->
-            val debut = aujourdHui.minusDays(7 * k + 7)
-            val joursPesees = (0L..7L).map { debut.plusDays(it) }
-            estimerPeriode(parDate, lis, comp, debut, 7, joursPesees, enCours = false, minPesees = 3, minDepense = 5)
-        }
+    ): SemaineApports? {
+        val debut = aujourdHui.minusDays(7)
+        val joursPesees = (0L..7L).map { debut.plusDays(it) }
+        return estimerPeriode(parDate, lis, comp, debut, 7, joursPesees, enCours = true, minPesees = 3, minDepense = 5)
+    }
 
     private fun ecartPoids(parDate: Map<LocalDate, JourLabo>, date: LocalDate, k: Long): Double? {
         val avant = parDate[date]?.poids ?: return null

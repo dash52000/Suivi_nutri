@@ -81,16 +81,13 @@ class LaboTest {
         // Écart-type de référence 135,409 kcal/j : demi-largeur de l'IC = 1,96 × 135,409.
         assertEquals(1.959964 * 135.409, (s5.apports.haut - s5.apports.bas) / 2, 0.05)
 
-        // Blocs de 7 jours alignés sur aujourd'hui (J70) : fins J70, J63… J7, soit 10 blocs ; celui qui commence le
-        // lundi de la semaine 5 la reproduit. Références numpy : dernier bloc 1 728,567, premier 1 810,0.
-        assertEquals(10, r.blocs.size)
-        assertEquals(lundi.plusDays(63), r.blocs.last().lundi)
-        assertEquals(lundi, r.blocs.first().lundi)
-        val bloc5 = r.blocs.first { it.lundi == lundi.plusWeeks(5) }
-        assertEquals(s5.apports.estimation, bloc5.apports.estimation, 1e-9)
-        assertEquals(s5.apports.haut, bloc5.apports.haut, 1e-9)
-        assertEquals(1728.567, r.blocs.last().apports.estimation, 0.01)
-        assertEquals(1810.0, r.blocs.first().apports.estimation, 0.1)
+        // 7 derniers jours : J63 → J70 ; aujourd'hui est un lundi, ils reproduisent la semaine 9.
+        // Référence numpy : 1 728,567.
+        val sept = r.septDerniersJours!!
+        assertEquals(lundi.plusDays(63), sept.lundi)
+        assertTrue(sept.enCours)
+        assertEquals(1728.567, sept.apportsEstimes, 0.01)
+        assertEquals(r.semaines.first { it.lundi == lundi.plusWeeks(9) }.apportsEstimes, sept.apportsEstimes, 1e-9)
     }
 
     /**
