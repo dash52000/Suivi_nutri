@@ -1,5 +1,7 @@
 package io.github.dash52000.suivinutri.labo
 
+import io.github.dash52000.suivinutri.data.EtatObjectif
+import io.github.dash52000.suivinutri.data.PlanWeekEnd
 import java.time.LocalDate
 import java.util.Locale
 import kotlin.math.sqrt
@@ -27,9 +29,26 @@ object TableAnalyse {
         true -> "TRUE"; false -> "FALSE"; null -> "NA"
     }
 
-    /** [idsQuestions] : identifiants des questions (intégrées, perso et « alcool »), une colonne chacune. */
-    fun csv(jours: List<JourLabo>, aujourdHui: LocalDate, idsQuestions: List<String>): String {
-        val entete = (COLONNES_FIXES + idsQuestions + listOf("nb_boissons", "unites_alcool")).joinToString(",")
+    /** v1.9 : objectif de perte, en fin de ligne (le coach ignore les colonnes qu'il ne lit pas). */
+    private val COLONNES_OBJECTIF = listOf(
+        "levier_semaine", "budget_bieres", "bieres_eq33", "plan_bieres", "plan_repas_dehors", "nb_seances",
+    )
+
+    /** Texte libre (libellé d'un levier) : entre guillemets, guillemets doublés. */
+    private fun texte(s: String?): String = s?.let { "\"" + it.replace("\"", "\"\"") + "\"" } ?: "NA"
+
+    /**
+     * [idsQuestions] : identifiants des questions (intégrées, perso et « alcool »), une colonne chacune.
+     * [objectif] : levier, budget et plan du week-end ; sans lui, ces colonnes sont à NA.
+     */
+    fun csv(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        idsQuestions: List<String>,
+        objectif: EtatObjectif? = null,
+    ): String {
+        val entete = (COLONNES_FIXES + idsQuestions + listOf("nb_boissons", "unites_alcool") + COLONNES_OBJECTIF)
+            .joinToString(",")
         val parDate = jours.associateBy { it.date }
         val eau = Labo.lissageEau(jours, aujourdHui)
         val ecarts = Labo.ecartsEau(jours, aujourdHui, eau)
@@ -43,6 +62,9 @@ object TableAnalyse {
 
         val l = lis
         val c = Labo.compartiments(jours, aujourdHui, ecarts)
+        val budgets = objectif?.let { o ->
+            Cap.analyser(jours, lis, o, aujourdHui, emptyList()).semaines.associate { it.lundi to it.budget }
+        } ?: emptyMap()
         val lignes = generateSequence(debut) { it.plusDays(1) }
             .takeWhile { !it.isAfter(aujourdHui) }
             .map { d ->
@@ -93,6 +115,14 @@ object TableAnalyse {
                 idsQuestions.forEach { cellules += e?.reponses?.get(it) ?: "NA" }
                 cellules += if (alcoolRepondu) e!!.boissons.size.toString() else "NA"
                 cellules += if (alcoolRepondu) nombre(e!!.unitesAlcool, 2) else "NA"
+                val lundi = Cap.lundiDe(d)
+                val plan = PlanWeekEnd.vendrediDe(d)?.let { objectif?.plans?.get(it) }
+                cellules += texte(objectif?.leviers?.get(lundi))
+                cellules += budgets[lundi]?.toString() ?: "NA"
+                cellules += nombre(Cap.bieresEq33(e), 2)
+                cellules += plan?.bieresPrevues(d)?.toString() ?: "NA"
+                cellules += plan?.repasDehorsPrevus(d)?.toString() ?: "NA"
+                cellules += j?.nbSeances?.toString() ?: "NA"
                 cellules.joinToString(",")
             }
             .toList()

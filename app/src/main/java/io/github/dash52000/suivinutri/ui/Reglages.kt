@@ -45,6 +45,7 @@ import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.data.Moment
+import io.github.dash52000.suivinutri.data.Objectif
 import io.github.dash52000.suivinutri.data.QuestionPerso
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.TypePerso
@@ -54,6 +55,7 @@ import io.github.dash52000.suivinutri.labo.TableAnalyse
 import io.github.dash52000.suivinutri.labo.collecterJours
 import io.github.dash52000.suivinutri.labo.joursSansSante
 import io.github.dash52000.suivinutri.notif.Rappel
+import io.github.dash52000.suivinutri.notif.Signal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +71,13 @@ private val libellesConditions = listOf(
 )
 
 @Composable
-fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
+fun EcranReglages(
+    journal: Journal,
+    config: Configuration,
+    health: HealthData,
+    objectif: Objectif,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var actif by remember { mutableStateOf(Rappel.actif(context)) }
@@ -85,7 +93,9 @@ fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, m
     val exporterJson = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             // La sauvegarde contient le journal et la configuration des questions.
-            val racine = JSONObject(journal.exportJson()).put("configuration", config.versJson())
+            val racine = JSONObject(journal.exportJson())
+                .put("configuration", config.versJson())
+                .put("objectif", objectif.versJson())
             message = ecrire(context, uri, racine.toString(2), "Sauvegarde enregistrée.")
             Usage.log(context, "export", "json")
         }
@@ -102,7 +112,8 @@ fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, m
                 } catch (e: SecurityException) {
                     joursSansSante(journal.toutes()) to false
                 }
-                val texte = withContext(Dispatchers.Default) { TableAnalyse.csv(jours, aujourdHui, ids) }
+                val etatObjectif = objectif.etat()
+                val texte = withContext(Dispatchers.Default) { TableAnalyse.csv(jours, aujourdHui, ids, etatObjectif) }
                 message = ecrire(
                     context, uri, texte,
                     if (complet) "Table d'analyse enregistrée (une ligne par jour)."
@@ -125,6 +136,10 @@ fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, m
                     ?: error("fichier illisible")
                 val jours = journal.importJson(texte)
                 JSONObject(texte).optJSONObject("configuration")?.let { config.importer(it) }
+                JSONObject(texte).optJSONObject("objectif")?.let {
+                    objectif.importer(it)
+                    Signal.programmer(context)
+                }
                 Usage.log(context, "import", "jours=$jours")
                 "$jours jour(s) restauré(s)."
             } catch (e: Exception) {
@@ -200,6 +215,8 @@ fun EcranReglages(journal: Journal, config: Configuration, health: HealthData, m
                 },
             )
         }
+        HorizontalDivider()
+        SectionObjectif(objectif)
         HorizontalDivider()
         SectionQuestions(config)
         HorizontalDivider()
@@ -408,3 +425,83 @@ private fun ecrire(context: Context, uri: Uri, texte: String, succes: String): S
     } catch (e: Exception) {
         "Échec : ${e.message}"
     }
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SectionObjectif(objectif: Objectif) {
+    val context = LocalContext.current
+    var etat by remember { mutableStateOf(objectif.etat()) }
+    var confirmerDepart by remember { mutableStateOf(false) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Objectif", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Couloir de ${nombre(etat.couloirBas, 2)} à ${nombre(etat.couloirHaut, 2)} kg par semaine, depuis le " +
+                "${etat.debut.format(formatCourt)}.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text("Budget bière de départ (bouteilles de 33 cl par semaine)", style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            (0..7).forEach { n ->
+                FilterChip(
+                    selected = etat.budgetInitial == n,
+                    onClick = {
+                        objectif.reglerBudget(n)
+                        Usage.log(context, "reglage", "budget_bieres=$n")
+                        etat = objectif.etat()
+                    },
+                    label = { Text(n.toString()) },
+                )
+            }
+        }
+        Text(
+            "2 semaines de suite au-dessus du couloir : une bière de moins. 2 semaines de suite dans le couloir : " +
+                "une de plus, sans dépasser ce budget.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Signal de la semaine")
+                Text(
+                    "Une notif par semaine au plus, à 18 h, le soir qui dérape le plus souvent (vendredi par défaut).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = etat.signalActif,
+                onCheckedChange = {
+                    objectif.reglerSignal(it)
+                    Signal.programmer(context)
+                    Usage.log(context, "reglage", "signal_actif=$it")
+                    etat = objectif.etat()
+                },
+            )
+        }
+        OutlinedButton(onClick = { confirmerDepart = true }) { Text("Repartir de cette semaine") }
+    }
+
+    if (confirmerDepart) {
+        AlertDialog(
+            onDismissRequest = { confirmerDepart = false },
+            title = { Text("Repartir de cette semaine ?") },
+            text = {
+                Text(
+                    "Les semaines d'avant ne comptent plus pour le cap ni pour le budget bière. Leviers et plans " +
+                        "du week-end restent enregistrés."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    objectif.repartir(LocalDate.now())
+                    Usage.log(context, "reglage", "objectif_depart=${LocalDate.now()}")
+                    etat = objectif.etat()
+                    confirmerDepart = false
+                }) { Text("Repartir") }
+            },
+            dismissButton = { TextButton(onClick = { confirmerDepart = false }) { Text("Annuler") } },
+        )
+    }
+}

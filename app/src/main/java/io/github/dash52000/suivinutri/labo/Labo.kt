@@ -21,6 +21,8 @@ data class JourLabo(
     /** Séance d'endurance d'au moins [Labo.LONGUE_SORTIE_MIN] minutes ; null si Health Connect n'a rien lu. */
     val longueSortie: Boolean? = null,
     val minutesSeances: Long? = null,
+    /** Nombre de séances du jour ; null si Health Connect n'a rien lu. */
+    val nbSeances: Int? = null,
     /** Composition de la balance (bio-impédance) : taux de graisse en %, masses en kg. */
     val graissePct: Double? = null,
     val masseMaigreHcKg: Double? = null,

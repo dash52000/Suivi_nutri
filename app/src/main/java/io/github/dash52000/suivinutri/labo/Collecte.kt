@@ -32,6 +32,7 @@ fun versJourLabo(date: LocalDate, s: Journee?, e: EntreeJour?): JourLabo = JourL
     heurePesee = s?.poidsHeure,
     longueSortie = s?.activites?.any { it.endurance && it.dureeMin >= Labo.LONGUE_SORTIE_MIN },
     minutesSeances = s?.activites?.sumOf { it.dureeMin },
+    nbSeances = s?.activites?.size,
     graissePct = s?.graissePct,
     masseMaigreHcKg = s?.masseMaigreKg,
     eauKg = s?.eauKg,

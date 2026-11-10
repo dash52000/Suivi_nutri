@@ -53,6 +53,45 @@ class TableAnalyseTest {
         assertEquals("NA", cellule(1, "ecart_eau_kg"))
     }
 
+    /** v1.9 : levier de la semaine, budget, bières en équivalent 33 cl et plan du week-end. */
+    @Test
+    fun colonnesObjectif() {
+        val vendredi = d0.plusDays(1) // le 29/10/2026 est un jeudi
+        val jours = listOf(
+            JourLabo(d0, poids = 88.0, heurePesee = 7, nbSeances = 2),
+            JourLabo(
+                vendredi,
+                poids = 87.8,
+                heurePesee = 7,
+                entree = EntreeJour(vendredi, mapOf("alcool" to "oui"), listOf(Boisson("tripel", 33.0, 8.5))),
+            ),
+        )
+        val objectif = io.github.dash52000.suivinutri.data.EtatObjectif(
+            debut = d0,
+            leviers = mapOf(LocalDate.of(2026, 10, 26) to "Soir · pas de rab"),
+            plans = mapOf(
+                vendredi to io.github.dash52000.suivinutri.data.PlanWeekEnd(
+                    vendredi, repas = mapOf("ven_soir" to "dehors"), bieres = mapOf("ven" to 2),
+                ),
+            ),
+        )
+        val lignes = TableAnalyse.csv(jours, vendredi, listOf("alcool"), objectif).trim().lines()
+        val entete = lignes[0].split(",")
+        fun cellule(ligne: Int, colonne: String) = lignes[ligne].split(",")[entete.indexOf(colonne)]
+        assertEquals("\"Soir · pas de rab\"", cellule(2, "levier_semaine"))
+        assertEquals("3", cellule(2, "budget_bieres"))
+        assertEquals("1.00", cellule(2, "bieres_eq33"))
+        assertEquals("NA", cellule(1, "bieres_eq33"))
+        assertEquals("2", cellule(2, "plan_bieres"))
+        assertEquals("1", cellule(2, "plan_repas_dehors"))
+        assertEquals("NA", cellule(1, "plan_bieres"))
+        assertEquals("2", cellule(1, "nb_seances"))
+        assertEquals("NA", cellule(2, "nb_seances"))
+        // Sans objectif, les colonnes existent mais restent à NA.
+        val sans = TableAnalyse.csv(jours, vendredi, listOf("alcool")).trim().lines()
+        assertEquals("NA", sans[2].split(",")[entete.indexOf("levier_semaine")])
+    }
+
     @Test
     fun jourSansMontreEtEauCorrigee() {
         val jours = (0L..3L).map { k ->

@@ -22,6 +22,30 @@ Le workflow signe avec une clé fixe, fournie par deux secrets du dépôt
 La clé ne doit jamais être commitée. Sans elle, impossible de publier une mise à
 jour qui s'installe par-dessus l'appli existante.
 
+## Objectif de perte (v1.9, onglet Cap)
+
+Le but de l'appli est de perdre du poids : elle garde ses mesures et ajoute un cap et une boucle hebdomadaire.
+Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'instrument, c'est la tendance du poids.
+
+- **Couloir** : −0,40 à −0,25 kg/semaine. Pente d'une semaine = niveau lissé du lundi matin suivant − niveau du
+  lundi matin, IC 95 % tiré de la covariance a posteriori du lisseur (≈ ± 0,24 kg avec une pesée par jour).
+  Au-dessus du couloir : tout l'intervalle au-dessus de −0,25 ; plus vite : tout l'intervalle sous −0,40 ; dans le
+  couloir : estimation entre les deux ; sinon (ou moins de 3 pesées) : pas encore lisible. Semaine en cours :
+  pente provisoire dès 2 jours écoulés, ramenée à 7 jours.
+- **Budget bière** : 3 bouteilles de 33 cl par semaine au départ (réglable). 2 semaines finies de suite au-dessus
+  du couloir : −1 (minimum 0) ; 2 de suite dans le couloir ou plus vite : +1, sans dépasser le départ ; une semaine
+  pas lisible remet les compteurs à zéro. Bières seulement (pils à quadrupel), en équivalent 33 cl.
+- **Levier de la semaine** : 3 propositions, les réflexes les moins tenus des 14 derniers jours (au moins 3
+  réponses), ou un autre au choix. Adhérence = soirs tenus / soirs renseignés. Pas de conclusion causale dans
+  l'appli : R agrège les semaines (`levier_semaine`).
+- **Plan du week-end** (vendredi → dimanche) : 5 repas normal / dehors, bières prévues par jour. Du lundi au jeudi,
+  comparaison avec le questionnaire (midi à l'extérieur, dîner chez les beaux-parents ou ailleurs, boissons).
+- **Signal de la semaine** : une notif au plus par semaine, à 18 h, le soir qui dérape le plus sur 8 semaines
+  (rab, part normale de dessert ou ≥ 2 unités d'alcool ; au moins 3 soirs renseignés et 50 % de dérapages) ;
+  vendredi par défaut, pour le plan du week-end. Désactivable.
+- **Activité** : chaque semaine affiche séances, minutes et dépense moyenne (jours avec montre). Flux unique
+  Suivi_nutri → coach running par l'export CSV ; pas de lecture du plan d'entraînement.
+
 ## Labo
 
 - **Tendance du poids** : filtre et lisseur de Kalman (niveau local + pente, pas journalier).
@@ -82,6 +106,8 @@ midi, longue sortie, composition (taux de graisse, masses grasse et maigre, mass
 eau, os) et leurs tendances, toutes les réponses, nombre de boissons et unités d'alcool. Depuis la v1.7 :
 dépense retenue (`kcal_retenue`, NA les jours sans montre), tendance et écart de l'eau, poids et masse
 grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` reste pesée brute − tendance).
+Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_bieres`, `bieres_eq33`,
+`plan_bieres`, `plan_repas_dehors`, `nb_seances`.
 
 ## Feuille de route
 
@@ -108,5 +134,7 @@ grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` re
   coucher et collation en pause par défaut (toujours « non » et toujours « oui »), réactivables
 - **v1.8** : apports des 7 derniers jours en dernière barre (même graphe), pesée du jour décomposée en eau et reste,
   pesées corrigées de l'eau dans le graphe du poids, calcul du labo partagé entre Données et Labo
+- **v1.9** : objectif de perte, onglet Cap — couloir de pente, levier de la semaine, plan du week-end,
+  budget bière ajusté par la pente, signal de la semaine, colonnes de l'objectif dans l'export
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

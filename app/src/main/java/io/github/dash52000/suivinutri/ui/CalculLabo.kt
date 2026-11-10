@@ -6,6 +6,8 @@ import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.labo.JourLabo
+import io.github.dash52000.suivinutri.labo.Kalman
 import io.github.dash52000.suivinutri.labo.Labo
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.ResultatLabo
@@ -19,7 +21,7 @@ import java.time.Instant
 import java.time.LocalDate
 
 /**
- * Calcul du labo partagé par les onglets Labo et Données, gardé tant que l'appli tourne : changer d'onglet ne
+ * Calcul du labo partagé par les onglets Labo, Données et Cap, gardé tant que l'appli tourne : changer d'onglet ne
  * relance pas la lecture d'un an de Health Connect. Recalcul si le jour, le journal ou les questions changent,
  * si le calcul a plus de 3 heures, ou à la demande. Un seul calcul à la fois : le second onglet attend le premier.
  */
@@ -30,6 +32,10 @@ internal object CalculLabo {
         val calendrier: List<LigneCalendrier>,
         val dates28: List<LocalDate>,
         val calculeLe: Instant,
+        /** Jours lus (Health Connect + journal) et tendance du poids : l'onglet Cap s'en sert (v1.9). */
+        val jours: List<JourLabo>,
+        val lissage: Kalman.Lissage?,
+        val aujourdHui: LocalDate,
     )
 
     const val DUREE_CACHE_HEURES = 3L
@@ -78,6 +84,9 @@ internal object CalculLabo {
                 calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),
                 dates28 = dates28,
                 calculeLe = Instant.now(),
+                jours = jours,
+                lissage = Labo.lissage(jours, aujourdHui),
+                aujourdHui = aujourdHui,
             )
         }
         dernier = calcul

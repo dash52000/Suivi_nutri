@@ -64,6 +64,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".notif.SignalReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".notif.DemarrageReceiver"
             android:exported="true">
             <intent-filter>

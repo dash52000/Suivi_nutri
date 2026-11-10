@@ -124,11 +124,14 @@ class RappelReceiver : BroadcastReceiver() {
     }
 }
 
-/** Reprogramme la notif après un redémarrage du téléphone ou une mise à jour de l'appli. */
+/** Reprogramme les notifs (rappel du soir, signal de la semaine) après un redémarrage du téléphone ou une mise à jour de l'appli. */
 class DemarrageReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> Rappel.programmer(context)
+            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                Rappel.programmer(context)
+                Signal.programmer(context)
+            }
         }
     }
 }
