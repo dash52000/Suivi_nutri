@@ -14,6 +14,9 @@ import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
+import androidx.health.connect.client.records.metadata.DataOrigin
+import androidx.health.connect.client.request.AggregateGroupByDurationRequest
+import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
@@ -98,6 +101,9 @@ class HealthData(context: Context) {
 
         /** Pas (v1.10) : facultatifs, pour les pas hors sport de l'onglet Cap. */
         val PERMISSIONS_PAS: Set<String> = setOf(HealthPermission.getReadPermission(StepsRecord::class))
+
+        /** Les pas sont lus par quarts d'heure (v1.10). */
+        const val QUART_HEURE_MIN = 15L
 
         fun statut(context: Context): Int = HealthConnectClient.getSdkStatus(context)
     }
@@ -240,13 +246,14 @@ class HealthData(context: Context) {
 
         // Pas : Garmin seulement (le téléphone en compte aussi), moins ceux des séances, jour par jour.
         val plages = seances.map { Plage(it.startTime, it.endTime) }
-        val pas = if (PERMISSIONS_PAS.first() !in accordees) emptyMap() else {
-            tranchesPas(t0, t1).first
+        // Une erreur sur les pas ne doit jamais empêcher le reste de la lecture.
+        val pas = if (PERMISSIONS_PAS.first() !in accordees) emptyMap() else runCatching {
+            tranchesPas(t0, t1)
                 .groupBy { it.debut.atZone(zone).toLocalDate() }
                 .mapValues { (_, tranches) ->
                     tranches.sumOf { it.pas } to Pas.horsSeances(tranches, plages)
                 }
-        }
+        }.getOrElse { emptyMap() }
 
         return generateSequence(fin) { it.minusDays(1) }
             .takeWhile { !it.isBefore(debut) }
@@ -270,20 +277,44 @@ class HealthData(context: Context) {
             .toList()
     }
 
-    /** Tranches de pas de Garmin sur la période, et toutes les sources qui en écrivent. */
-    private suspend fun tranchesPas(t0: Instant, t1: Instant): Pair<List<TranchePas>, List<String>> {
-        val bruts = lireTout<StepsRecord>(t0, t1)
-        val garmin = Sources.garminSeulement(bruts) { it.metadata.dataOrigin.packageName }
-            .map { TranchePas(it.startTime, it.endTime, it.count) }
-        return garmin to bruts.map { Sources.libelle(it.metadata.dataOrigin.packageName) }.distinct()
+    /**
+     * Pas de Garmin par quarts d'heure, agrégés par Health Connect. On ne lit pas les enregistrements bruts : Garmin
+     * en écrit de durée nulle, que la bibliothèque Health Connect refuse (« startTime must be before endTime »).
+     * Par tranches de 7 jours (672 quarts d'heure par requête).
+     */
+    private suspend fun tranchesPas(t0: Instant, t1: Instant): List<TranchePas> {
+        val resultat = mutableListOf<TranchePas>()
+        var debut = t0
+        while (debut.isBefore(t1)) {
+            val fin = minOf(debut.plus(Duration.ofDays(7)), t1)
+            client.aggregateGroupByDuration(
+                AggregateGroupByDurationRequest(
+                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(debut, fin),
+                    timeRangeSlicer = Duration.ofMinutes(QUART_HEURE_MIN),
+                    dataOriginFilter = setOf(DataOrigin(Sources.GARMIN_CONNECT)),
+                )
+            ).forEach { g ->
+                val n = g.result[StepsRecord.COUNT_TOTAL] ?: return@forEach
+                if (n > 0) resultat += TranchePas(g.startTime, g.endTime, n)
+            }
+            debut = fin
+        }
+        return resultat
     }
 
     /** Taille des tranches de pas d'un jour ; null sans l'autorisation de lire les pas. */
-    suspend fun diagnosticPas(jour: LocalDate): DiagnosticPas? {
+    suspend fun diagnosticPas(jour: LocalDate): DiagnosticPas? = runCatching { lireDiagnosticPas(jour) }.getOrNull()
+
+    private suspend fun lireDiagnosticPas(jour: LocalDate): DiagnosticPas? {
         if (!permissionsAccordees().containsAll(PERMISSIONS_PAS)) return null
         val t0 = jour.debutInstant()
         val t1 = jour.plusDays(1).debutInstant()
-        val (tranches, sources) = tranchesPas(t0, t1)
+        val tranches = tranchesPas(t0, t1)
+        // Sources : toutes les applis qui écrivent des pas ce jour-là (seul Garmin est compté).
+        val sources = client.aggregate(
+            AggregateRequest(metrics = setOf(StepsRecord.COUNT_TOTAL), timeRangeFilter = TimeRangeFilter.between(t0, t1))
+        ).dataOrigins.map { Sources.libelle(it.packageName) }
         val plages = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
             .map { Plage(it.startTime, it.endTime) }
         return Pas.diagnostic(tranches, plages, sources)

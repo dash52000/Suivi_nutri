@@ -270,18 +270,14 @@ private fun CarteDiagnostic(d: DiagnosticCalories) {
 private fun CarteDiagnosticPas(d: DiagnosticPas) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Tranches de pas — hier", style = MaterialTheme.typography.titleSmall)
+            Text("Pas — hier", style = MaterialTheme.typography.titleSmall)
             if (d.nbTranches == 0) {
-                Text("Aucune tranche de pas Garmin reçue hier.")
+                Text("Aucun pas Garmin reçu hier.")
             } else {
-                Text(
-                    "${d.nbTranches} tranches Garmin, durée médiane ${String.format(Locale.FRENCH, "%.0f", d.dureeMedianeMin ?: 0.0)} min, " +
-                        "la plus longue ${String.format(Locale.FRENCH, "%.0f", d.dureeMaxMin ?: 0.0)} min."
-                )
                 Text("Pas : ${d.total}, hors sport : ${d.horsSport}.")
                 Text(
-                    if ((d.dureeMedianeMin ?: 0.0) <= 30.0) "Tranches fines : la soustraction des séances est propre."
-                    else "Tranches longues : les pas des séances sont retirés au prorata, c'est approximatif.",
+                    "Lus par quarts d'heure (${d.nbTranches} quarts d'heure avec des pas). Seuls les deux quarts " +
+                        "d'heure au début et à la fin d'une séance sont coupés au prorata.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

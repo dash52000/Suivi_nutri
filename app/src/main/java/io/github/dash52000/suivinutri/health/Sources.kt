@@ -8,6 +8,9 @@ object Sources {
     /** Balance connectée Withings (appli com.withings.wiscale2). */
     fun estWithings(paquet: String): Boolean = paquet.contains("withings", ignoreCase = true)
 
+    /** Paquet de l'appli Garmin Connect, seule source de pas comptée (v1.10). */
+    const val GARMIN_CONNECT = "com.garmin.android.apps.connectmobile"
+
     /** Garmin Connect : seule source retenue pour les séances et le sommeil (sinon doublons Strava, etc.). */
     fun estGarmin(paquet: String): Boolean = paquet.contains("garmin", ignoreCase = true)
 

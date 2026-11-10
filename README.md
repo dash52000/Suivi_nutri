@@ -47,8 +47,9 @@ Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'in
   cheval sur une séance est coupée au prorata ; séances qui se chevauchent comptées une fois). Jours finis avec
   au moins 1 000 pas seulement. Base = médiane des 8 semaines avant le départ (à défaut, des 8 premières semaines
   de données, au moins 14 jours) ; cible = base + 2 000. Chaque semaine : moyenne et jours au-dessus de la cible ;
-  levier possible « pas hors sport ≥ cible ». Données affiche la taille des tranches reçues hier (fines : la
-  soustraction est propre ; longues : prorata approximatif). Autorisation Health Connect facultative.
+  levier possible « pas hors sport ≥ cible ». Pas lus par quarts d'heure agrégés par Health Connect (Garmin
+  seulement) : Garmin écrit des enregistrements de durée nulle que la bibliothèque refuse en lecture brute.
+  Données affiche les pas d'hier, total et hors sport. Autorisation Health Connect facultative.
 - **Activité** : chaque semaine affiche séances, minutes et dépense moyenne (jours avec montre). Flux unique
   Suivi_nutri → coach running par l'export CSV ; pas de lecture du plan d'entraînement.
 
