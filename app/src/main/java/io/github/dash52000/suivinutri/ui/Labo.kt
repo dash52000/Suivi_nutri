@@ -201,13 +201,14 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         "Poids",
         (if (masquerPesee) "La tendance, sans les pesées du jour. "
         else "Des points pour les pesées (vides : écartées), un trait pour la tendance. ") +
-            "La bande donne son incertitude à 95 % : elle s'élargit quand tu ne te pèses pas.",
+            "La bande donne son incertitude à 95 % : elle s'élargit quand tu ne te pèses pas. Quand la balance " +
+            "mesure l'eau, la tendance suit le poids corrigé de l'eau du jour (repas salé, glycogène).",
     ) {
         GraphePoids(r.poids, masquerPesee)
         val c = r.composition
         if (c != null && !masquerPesee) {
             Text(
-                "Composition (tendances de la balance) : masse grasse ${nombre(c.graisseKg, 1)} ± " +
+                "Composition (tendances de la balance, corrigées de l'eau) : masse grasse ${nombre(c.graisseKg, 1)} ± " +
                     "${nombre(Stats.Z975 * c.graisseSe, 1)} kg (${nombre(c.graissePct, 1)} %), masse maigre " +
                     "${nombre(c.maigreKg, 1)} ± ${nombre(Stats.Z975 * c.maigreSe, 1)} kg.",
                 style = MaterialTheme.typography.bodySmall,
@@ -220,12 +221,13 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         "Dépense moyenne + énergie stockée ou déstockée. Avec la balance : masse grasse × 9 440 kcal/kg + masse " +
             "maigre × 1 816 kcal/kg (l'eau et le glycogène ne comptent presque plus comme de la graisse). " +
             "Sans composition : variation du poids × 7 700 kcal/kg. Intervalle à 95 % lié aux mesures. " +
+            "Les jours sans montre (ni sommeil ni séance, moins de 2 000 kcal) sont écartés de la dépense. " +
             "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
             "fie-toi aux variations d'une semaine à l'autre, pas au chiffre brut.",
     ) {
         if (r.semaines.isEmpty()) {
             Ligne(
-                "Pas encore de semaine exploitable : il faut au moins 3 pesées et 5 jours de dépense dans la " +
+                "Pas encore de semaine exploitable : il faut au moins 3 pesées et 5 jours de dépense avec la montre dans la " +
                     "semaine (pour la semaine en cours, 2 jours écoulés et une pesée suffisent)."
             )
         } else {

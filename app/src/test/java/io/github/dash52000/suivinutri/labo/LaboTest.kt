@@ -84,7 +84,8 @@ class LaboTest {
 
     /**
      * Graisse −0,05 kg/j et maigre −0,015 kg/j, dépense 2 500 : bilan vrai 2 500 − (9 440 × 0,35 + 1 816 × 0,105) ÷ 7
-     * ≈ 2 000,8 kcal/j. Référence numpy (mêmes paramètres de lissage) : 2 001,256, écart-type 98,738.
+     * ≈ 2 000,8 kcal/j. Référence numpy (mêmes paramètres de lissage) : 2 001,256 ; écart-type 98,738 sans la
+     * corrélation des erreurs, 54,058 avec ρ = −0,75 (balance sans mesure d'eau).
      */
     @Test
     fun apportsParCompartiments() {
@@ -100,9 +101,100 @@ class LaboTest {
         assertEquals(-0.349602, s5.deltaGraisseKg!!, 1e-5)
         assertEquals(-0.105158, s5.deltaMaigreKg!!, 1e-5)
         assertEquals(2001.256, s5.apportsEstimes, 0.01)
-        assertEquals(1.959964 * 98.7379, (s5.apports.haut - s5.apports.bas) / 2, 0.01)
+        assertEquals(1.959964 * 54.0580, (s5.apports.haut - s5.apports.bas) / 2, 0.01)
         assertNotNull(r.composition)
         assertEquals(25.0, 100 * 22 / 88.0, 1e-9)
+    }
+
+    /**
+     * Même cas avec l'eau mesurée (constante : écart nul) : paramètres des mesures corrigées et ρ = −0,15.
+     * Référence numpy : graisse −0,350343, maigre −0,105073, apports 2 000,279, écart-type 82,886.
+     */
+    @Test
+    fun apportsParCompartimentsCorrigesParLEau() {
+        val lundi = LocalDate.of(2026, 8, 3)
+        val jours = (0L until 71L).map { k ->
+            val fm = 22 - 0.05 * k
+            val ffm = 66 - 0.015 * k
+            JourLabo(
+                date = lundi.plusDays(k), poids = fm + ffm, graissePct = 100 * fm / (fm + ffm), eauKg = 46.0,
+                kcal = 2500.0,
+            )
+        }
+        val r = Labo.analyser(jours, lundi.plusDays(70))
+        val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
+        assertEquals(Methode.COMPOSITION, s5.methode)
+        assertEquals(-0.350343, s5.deltaGraisseKg!!, 1e-5)
+        assertEquals(-0.105073, s5.deltaMaigreKg!!, 1e-5)
+        assertEquals(2000.279, s5.apportsEstimes, 0.01)
+        assertEquals(1.959964 * 82.8864, (s5.apports.haut - s5.apports.bas) / 2, 0.01)
+    }
+
+    /**
+     * Poids vrai 80 kg, graisse vraie 20 kg ; l'eau varie chaque jour, le poids suit (× 0,73) et la balance
+     * déplace la graisse (× −0,8). Les écarts d'eau sont retrouvés à 0,05 kg près et les tendances corrigées
+     * restent plus près de la vérité que sans la correction (références numpy : 0,029 contre 0,044 kg pour le
+     * poids, 0,030 contre 0,034 kg pour la graisse).
+     */
+    @Test
+    fun correctionParLEau() {
+        val n = 60
+        val ecart = (0 until n).map { t -> 0.6 * kotlin.math.sin(1.7 * t) + 0.3 * kotlin.math.cos(2.9 * t) }
+        fun jours(avecEau: Boolean) = (0 until n).map { t ->
+            val poids = 80 + 0.73 * ecart[t]
+            JourLabo(
+                date = debut.plusDays(t.toLong()),
+                poids = poids,
+                graissePct = 100 * (20 - 0.8 * ecart[t]) / poids,
+                eauKg = if (avecEau) 46 + ecart[t] else null,
+            )
+        }
+        val aujourdHui = debut.plusDays((n - 1).toLong())
+        val ecarts = Labo.ecartsEau(jours(true), aujourdHui)
+        assertEquals(n, ecarts.size)
+        (0 until n).forEach { t -> assertEquals(ecart[t], ecarts.getValue(debut.plusDays(t.toLong())), 0.05) }
+
+        fun erreurs(avecEau: Boolean): Pair<Double, Double> {
+            val j = jours(avecEau)
+            val lis = Labo.lissage(j, aujourdHui)!!
+            val comp = Labo.compartiments(j, aujourdHui)!!
+            return (0 until n).maxOf { abs(lis.niveau(it) - 80) } to (0 until n).maxOf { abs(comp.graisse.niveau(it) - 20) }
+        }
+        val (poidsCorrige, graisseCorrigee) = erreurs(true)
+        val (poidsBrut, graisseBrute) = erreurs(false)
+        assertEquals(0.0294, poidsCorrige, 1e-3)
+        assertEquals(0.0444, poidsBrut, 1e-3)
+        assertEquals(0.0303, graisseCorrigee, 1e-3)
+        assertEquals(0.0340, graisseBrute, 1e-3)
+        assertEquals(n, Labo.compartiments(jours(true), aujourdHui)!!.corriges.size)
+    }
+
+    /** Jours sans montre : ni sommeil ni séance et moins de 2 000 kcal (Garmin ne compte que le métabolisme de base). */
+    @Test
+    fun depenseSansMontreEcartee() {
+        fun j(kcal: Double?, sommeil: Long? = null, seances: Long? = null) =
+            JourLabo(debut, kcal = kcal, sommeilMin = sommeil, minutesSeances = seances)
+        assertNull(Labo.kcalRetenue(j(1565.0)))
+        assertNull(Labo.kcalRetenue(j(1675.0, seances = 0)))
+        assertEquals(1565.0, Labo.kcalRetenue(j(1565.0, sommeil = 420))!!, 0.0)
+        assertEquals(1900.0, Labo.kcalRetenue(j(1900.0, seances = 45))!!, 0.0)
+        assertEquals(2283.0, Labo.kcalRetenue(j(2283.0))!!, 0.0)
+        assertNull(Labo.kcalRetenue(j(700.0, sommeil = 420)))
+        assertNull(Labo.kcalRetenue(j(null, sommeil = 420)))
+
+        // Une semaine avec deux jours sans montre : la dépense moyenne ne compte que les cinq autres.
+        val lundi = LocalDate.of(2026, 8, 3)
+        val jours = (0L until 21L).map { k ->
+            val sansMontre = k in 7L..8L
+            JourLabo(
+                date = lundi.plusDays(k), poids = 85.0, kcal = if (sansMontre) 1565.0 else 2600.0,
+                sommeilMin = if (sansMontre) null else 420L,
+            )
+        }
+        val r = Labo.analyser(jours, lundi.plusDays(20))
+        val s1 = r.semaines.first { it.lundi == lundi.plusWeeks(1) }
+        assertEquals(5, s1.nbJoursDepense)
+        assertEquals(2600.0, s1.depenseMoyenne, 1e-9)
     }
 
     @Test

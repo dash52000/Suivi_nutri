@@ -27,6 +27,13 @@ class QuestionPersoTest {
     }
 
     @Test
+    fun pauseParDefautV17() {
+        assertEquals(setOf("faim_coucher", "collation"), Configuration.pausesV17(emptySet()))
+        assertEquals(setOf("faim_coucher", "collation", "cafes"), Configuration.pausesV17(setOf("cafes")))
+        assertTrue(Configuration.PAUSE_V17.all { id -> Questionnaire.questions.any { it.id == id } })
+    }
+
+    @Test
     fun slugLisiblePourR() {
         assertEquals("grignote_apres_le_diner", Configuration.slug("Grignoté après le dîner ?"))
         assertEquals("bu_1_5_l_d_eau", Configuration.slug("Bu 1,5 L d'eau"))

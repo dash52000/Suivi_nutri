@@ -63,6 +63,21 @@ object Kalman {
     /** Masse maigre (poids − masse grasse) : elle porte l'eau et le glycogène, donc plus souple. */
     val MAIGRE = Parametres(0.6, 2.4, 0.01, 1e-5)
 
+    /**
+     * Eau de la balance : tendance raide, l'écart du jour à cette tendance sert à corriger le poids et la
+     * graisse (v1.7). Bruit (0,5 kg)², maximum de vraisemblance sur l'export du 10/11/2026.
+     */
+    val EAU = Parametres(0.25, 1.0, 0.0004, 4e-6)
+
+    /**
+     * Pesées corrigées de l'eau : l'eau explique la moitié des variations quotidiennes du poids
+     * (écart-type 0,56 → 0,39 kg, variance × 0,5), et de la masse grasse de la balance (0,63 → 0,45 kg).
+     * Masse maigre = poids − graisse corrigée : 0,86 → 0,41 kg. Mêmes bruits de niveau et de pente.
+     */
+    val POIDS_CORRIGE = Parametres(0.18, 0.72, Q_NIVEAU, Q_PENTE)
+    val GRAISSE_CORRIGEE = Parametres(0.25, 1.0, 0.0004, 4e-6)
+    val MAIGRE_CORRIGEE = Parametres(0.16, 0.64, 0.01, 1e-5)
+
     fun variancePesee(heure: Int?): Double = POIDS.variance(heure)
 
     /** Matrices 2 × 2 stockées [a, b, c, d] pour [[a, b], [c, d]]. */

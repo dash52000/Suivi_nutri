@@ -35,6 +35,16 @@ class Configuration(context: Context) {
 
     private val prefs = context.applicationContext.getSharedPreferences("questions", Context.MODE_PRIVATE)
 
+    init {
+        // Une seule fois : les questions mises en pause par une mise à jour restent réactivables dans Réglages.
+        if (!prefs.getBoolean(MIGRATION_V17, false)) {
+            prefs.edit()
+                .putStringSet("en_pause", pausesV17(enPause()))
+                .putBoolean(MIGRATION_V17, true)
+                .apply()
+        }
+    }
+
     fun enPause(): Set<String> = prefs.getStringSet("en_pause", emptySet()).orEmpty().toSet()
 
     fun mettreEnPause(id: String, pause: Boolean) {
@@ -136,6 +146,16 @@ class Configuration(context: Context) {
         }
 
     companion object {
+        private const val MIGRATION_V17 = "migration_v17"
+
+        /**
+         * v1.7 : sur les six premières semaines, la faim au coucher a toujours été « non » et la collation
+         * toujours « oui » (analyse R du 10/11/2026) : elles n'apportent plus d'information, en pause par défaut.
+         */
+        val PAUSE_V17 = setOf("faim_coucher", "collation")
+
+        fun pausesV17(actuelles: Set<String>): Set<String> = actuelles + PAUSE_V17
+
         /** Identifiant lisible pour R : minuscules, sans accents, mots séparés par « _ ». */
         fun slug(texte: String): String =
             Normalizer.normalize(texte.lowercase(), Normalizer.Form.NFD)

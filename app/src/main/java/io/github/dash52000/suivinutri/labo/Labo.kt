@@ -164,6 +164,23 @@ object Labo {
     private const val RETARD_JOURS = 2
     private const val KCAL_JOUR_MIN = 800.0
 
+    /**
+     * Sans sommeil ni séance, une journée sous 2 000 kcal est une journée sans montre : Garmin n'y compte que
+     * le métabolisme de base (1 565 ou 1 675 kcal dans l'export du 10/11/2026, 83 journées).
+     */
+    const val KCAL_SANS_MONTRE = 2000.0
+
+    /**
+     * Balance (analyse R du 10/11/2026, jours consécutifs) : quand l'eau mesurée dépasse sa tendance de 1 kg,
+     * le poids monte de 0,73 kg et la masse grasse affichée baisse de 0,8 kg.
+     */
+    const val EAU_VERS_POIDS = 0.73
+    const val EAU_VERS_GRAISSE = 0.8
+
+    /** Corrélation des erreurs graisse / maigre de la balance : −0,75 brute, −0,15 après correction par l'eau. */
+    const val RHO_COMPARTIMENTS_BRUT = -0.75
+    const val RHO_COMPARTIMENTS_CORRIGE = -0.15
+
     // ---------- Codage des réponses ----------
 
     private fun EntreeJour.rep(id: String): String? = reponses[id]
@@ -230,38 +247,108 @@ object Labo {
         return parDate[d]?.poids
     }
 
-    /** Lissage de Kalman de toutes les pesées, de la première jusqu'à aujourd'hui. Null sans pesée. */
-    fun lissage(jours: List<JourLabo>, aujourdHui: LocalDate): Kalman.Lissage? {
-        val pesees = jours.filter { it.poids != null }.sortedBy { it.date }
-        if (pesees.isEmpty()) return null
-        val debut = pesees.first().date
-        val fin = maxOf(aujourdHui, pesees.last().date)
-        val n = ChronoUnit.DAYS.between(debut, fin).toInt() + 1
-        val mesures = pesees.map { j ->
-            Kalman.Pesee(
-                jour = ChronoUnit.DAYS.between(debut, j.date).toInt(),
-                poids = j.poids!!,
-                variance = Kalman.variancePesee(j.heurePesee),
-            )
-        }
-        return Kalman.lisser(debut, n, mesures)
+    /**
+     * Dépense retenue d'un jour : null si elle manque, si elle est sous [KCAL_JOUR_MIN], ou si la montre n'a
+     * visiblement pas été portée (ni sommeil ni séance, et moins de [KCAL_SANS_MONTRE]).
+     */
+    fun kcalRetenue(j: JourLabo): Double? {
+        val k = j.kcal ?: return null
+        if (k < KCAL_JOUR_MIN) return null
+        if (j.sommeilMin == null && (j.minutesSeances ?: 0L) == 0L && k < KCAL_SANS_MONTRE) return null
+        return k
     }
 
-    /** Lissages de la masse grasse et de la masse maigre, sur la même grille de jours. */
-    class Compartiments(val graisse: Kalman.Lissage, val maigre: Kalman.Lissage)
+    /** Lissage d'une série journalière, du premier point jusqu'à aujourd'hui. */
+    private fun lisserSerie(
+        points: List<Pair<JourLabo, Double>>,
+        aujourdHui: LocalDate,
+        parametres: Kalman.Parametres,
+        variance: (JourLabo) -> Double,
+    ): Kalman.Lissage {
+        val tries = points.sortedBy { it.first.date }
+        val debut = tries.first().first.date
+        val n = ChronoUnit.DAYS.between(debut, maxOf(aujourdHui, tries.last().first.date)).toInt() + 1
+        val mesures = tries.map { (j, v) -> Kalman.Pesee(ChronoUnit.DAYS.between(debut, j.date).toInt(), v, variance(j)) }
+        return Kalman.lisser(debut, n, mesures, parametres)
+    }
 
-    /** Null tant qu'il y a moins de [MIN_MESURES_COMPOSITION] jours avec poids et taux de graisse. */
-    fun compartiments(jours: List<JourLabo>, aujourdHui: LocalDate): Compartiments? {
-        val mesures = jours.filter { it.masseGrasse != null }.sortedBy { it.date }
+    /** Tendance de l'eau mesurée par la balance. Null avec moins de [MIN_MESURES_COMPOSITION] mesures. */
+    fun lissageEau(jours: List<JourLabo>, aujourdHui: LocalDate): Kalman.Lissage? {
+        val mesures = jours.filter { it.eauKg != null }
         if (mesures.size < MIN_MESURES_COMPOSITION) return null
-        val debut = mesures.first().date
-        val n = ChronoUnit.DAYS.between(debut, maxOf(aujourdHui, mesures.last().date)).toInt() + 1
-        fun jour(j: JourLabo) = ChronoUnit.DAYS.between(debut, j.date).toInt()
-        val graisse = mesures.map { Kalman.Pesee(jour(it), it.masseGrasse!!, Kalman.GRAISSE.variance(it.heurePesee)) }
-        val maigre = mesures.map { Kalman.Pesee(jour(it), it.masseMaigre!!, Kalman.MAIGRE.variance(it.heurePesee)) }
+        return lisserSerie(mesures.map { it to it.eauKg!! }, aujourdHui, Kalman.EAU) { Kalman.EAU.variance(it.heurePesee) }
+    }
+
+    /**
+     * Écart de l'eau du jour à sa tendance, pour chaque jour où l'eau est mesurée et n'a pas été écartée comme
+     * aberrante. Positif = plus d'eau que d'habitude (repas salé, glycogène plein) : le poids est gonflé et la
+     * balance sous-estime la graisse.
+     */
+    fun ecartsEau(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        eau: Kalman.Lissage? = lissageEau(jours, aujourdHui),
+    ): Map<LocalDate, Double> {
+        if (eau == null) return emptyMap()
+        return jours.mapNotNull { j ->
+            val e = j.eauKg ?: return@mapNotNull null
+            val i = eau.index(j.date) ?: return@mapNotNull null
+            if (i in eau.ecartees) null else j.date to e - eau.niveau(i)
+        }.toMap()
+    }
+
+    /** Poids corrigé de l'eau du jour ; le poids brut quand l'eau n'est pas mesurée. */
+    fun poidsCorrige(j: JourLabo, ecartEau: Double?): Double? =
+        j.poids?.let { if (ecartEau != null) it - EAU_VERS_POIDS * ecartEau else it }
+
+    /** Masse grasse corrigée de l'eau du jour ; la masse grasse de la balance quand l'eau n'est pas mesurée. */
+    fun graisseCorrigee(j: JourLabo, ecartEau: Double?): Double? =
+        j.masseGrasse?.let { if (ecartEau != null) it + EAU_VERS_GRAISSE * ecartEau else it }
+
+    /**
+     * Lissage de Kalman de toutes les pesées, de la première jusqu'à aujourd'hui. Null sans pesée.
+     * Les jours où la balance mesure l'eau, la pesée est corrigée de l'écart de l'eau à sa tendance et compte
+     * deux fois plus.
+     */
+    fun lissage(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        ecarts: Map<LocalDate, Double> = ecartsEau(jours, aujourdHui),
+    ): Kalman.Lissage? {
+        val pesees = jours.filter { it.poids != null }
+        if (pesees.isEmpty()) return null
+        return lisserSerie(pesees.map { it to poidsCorrige(it, ecarts[it.date])!! }, aujourdHui, Kalman.POIDS) { j ->
+            (if (ecarts[j.date] != null) Kalman.POIDS_CORRIGE else Kalman.POIDS).variance(j.heurePesee)
+        }
+    }
+
+    /**
+     * Lissages de la masse grasse et de la masse maigre, sur la même grille de jours.
+     * [corriges] : jours dont la composition a été corrigée par l'eau.
+     */
+    class Compartiments(val graisse: Kalman.Lissage, val maigre: Kalman.Lissage, val corriges: Set<LocalDate>)
+
+    /**
+     * Null tant qu'il y a moins de [MIN_MESURES_COMPOSITION] jours avec poids et taux de graisse.
+     * Graisse corrigée par l'eau quand elle est mesurée ; maigre = poids − graisse corrigée.
+     */
+    fun compartiments(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        ecarts: Map<LocalDate, Double> = ecartsEau(jours, aujourdHui),
+    ): Compartiments? {
+        val mesures = jours.filter { it.masseGrasse != null }
+        if (mesures.size < MIN_MESURES_COMPOSITION) return null
+        fun corrige(j: JourLabo) = ecarts[j.date] != null
+        val graisse = mesures.map { it to graisseCorrigee(it, ecarts[it.date])!! }
         return Compartiments(
-            Kalman.lisser(debut, n, graisse, Kalman.GRAISSE),
-            Kalman.lisser(debut, n, maigre, Kalman.MAIGRE),
+            graisse = lisserSerie(graisse, aujourdHui, Kalman.GRAISSE) { j ->
+                (if (corrige(j)) Kalman.GRAISSE_CORRIGEE else Kalman.GRAISSE).variance(j.heurePesee)
+            },
+            maigre = lisserSerie(graisse.map { (j, g) -> j to j.poids!! - g }, aujourdHui, Kalman.MAIGRE) { j ->
+                (if (corrige(j)) Kalman.MAIGRE_CORRIGEE else Kalman.MAIGRE).variance(j.heurePesee)
+            },
+            corriges = mesures.filter { corrige(it) }.map { it.date }.toSet(),
         )
     }
 
@@ -278,7 +365,8 @@ object Labo {
     ): ResultatLabo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
-        val lis = lissage(tries, aujourdHui)
+        val ecarts = ecartsEau(tries, aujourdHui)
+        val lis = lissage(tries, aujourdHui, ecarts)
 
         val poids = if (lis == null) emptyList() else {
             val depuis = maxOf(lis.debut, aujourdHui.minusDays(89))
@@ -299,7 +387,7 @@ object Labo {
                 .toList()
         }
 
-        val comp = compartiments(tries, aujourdHui)
+        val comp = compartiments(tries, aujourdHui, ecarts)
         val resume = comp?.let { c ->
             val i = c.graisse.index(aujourdHui) ?: return@let null
             ResumeComposition(
@@ -353,13 +441,14 @@ object Labo {
             // Semaine en cours : la pesée de ce matin compte aussi.
             val joursPesees = if (enCours) periode + aujourdHui else periode
             val pesees = joursPesees.count { peseeRetenue(lis, parDate, it) != null }
-            val kcal = periode.mapNotNull { parDate[it]?.kcal }.filter { it >= KCAL_JOUR_MIN }
+            val kcal = periode.mapNotNull { d -> parDate[d]?.let { kcalRetenue(it) } }
             if (pesees < minPesees || kcal.size < minDepense) return
             val delta = lis.niveau(i + jours) - lis.niveau(i)
 
             // Par compartiments si la balance a donné assez de mesures sur la période, sinon par le poids.
             val ic = comp?.graisse?.index(lundi)
-            val mesuresCompo = joursPesees.count { parDate[it]?.masseGrasse != null }
+            val joursCompo = joursPesees.filter { parDate[it]?.masseGrasse != null }
+            val mesuresCompo = joursCompo.size
             val parCompo = comp != null && ic != null && ic + jours < comp.graisse.n && mesuresCompo >= minPesees
             val estimation: Double
             val se: Double
@@ -371,10 +460,14 @@ object Labo {
                 dGraisse = g.niveau(ic!! + jours) - g.niveau(ic)
                 dMaigre = m.niveau(ic + jours) - m.niveau(ic)
                 estimation = kcal.average() + (KCAL_PAR_KG_GRAISSE * dGraisse + KCAL_PAR_KG_MAIGRE * dMaigre) / jours
-                se = sqrt(
-                    KCAL_PAR_KG_GRAISSE * KCAL_PAR_KG_GRAISSE * g.varDifference(ic, jours) +
-                        KCAL_PAR_KG_MAIGRE * KCAL_PAR_KG_MAIGRE * m.varDifference(ic, jours)
-                ) / jours
+                // Les erreurs de la balance sur la graisse et le maigre sont corrélées (ce qu'elle retire à
+                // l'une, elle l'ajoute à l'autre) : −0,75 brutes, −0,15 corrigées par l'eau, au prorata des
+                // mesures corrigées de la période.
+                val part = joursCompo.count { it in comp.corriges }.toDouble() / mesuresCompo
+                val rho = RHO_COMPARTIMENTS_BRUT + (RHO_COMPARTIMENTS_CORRIGE - RHO_COMPARTIMENTS_BRUT) * part
+                val a = KCAL_PAR_KG_GRAISSE * sqrt(g.varDifference(ic, jours))
+                val b = KCAL_PAR_KG_MAIGRE * sqrt(m.varDifference(ic, jours))
+                se = sqrt(maxOf(0.0, a * a + b * b + 2 * rho * a * b)) / jours
             } else {
                 val parKg = KCAL_PAR_KG / jours
                 estimation = kcal.average() + delta * parKg

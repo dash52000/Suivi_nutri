@@ -16,6 +16,8 @@ object TableAnalyse {
         "pente_kg_semaine", "residu_kg", "kcal_total", "sommeil_min", "minutes_seances", "seance_midi",
         "longue_sortie", "poids_source", "graisse_pct", "masse_grasse_kg", "masse_maigre_kg", "masse_maigre_hc_kg",
         "eau_kg", "os_kg", "tendance_graisse_kg", "tendance_graisse_se_kg", "tendance_maigre_kg", "tendance_maigre_se_kg",
+        // v1.7 : dépense retenue (NA les jours sans montre) et correction par l'eau de la balance.
+        "kcal_retenue", "tendance_eau_kg", "ecart_eau_kg", "poids_corrige_kg", "masse_grasse_corrigee_kg",
     )
 
     private fun nombre(x: Double?, decimales: Int): String =
@@ -29,7 +31,9 @@ object TableAnalyse {
     fun csv(jours: List<JourLabo>, aujourdHui: LocalDate, idsQuestions: List<String>): String {
         val entete = (COLONNES_FIXES + idsQuestions + listOf("nb_boissons", "unites_alcool")).joinToString(",")
         val parDate = jours.associateBy { it.date }
-        val lis = Labo.lissage(jours, aujourdHui)
+        val eau = Labo.lissageEau(jours, aujourdHui)
+        val ecarts = Labo.ecartsEau(jours, aujourdHui, eau)
+        val lis = Labo.lissage(jours, aujourdHui, ecarts)
 
         val avecDonnees = jours.filter {
             it.poids != null || it.kcal != null || it.sommeilMin != null || it.entree?.vide == false
@@ -38,7 +42,7 @@ object TableAnalyse {
             ?: return entete + "\n"
 
         val l = lis
-        val c = Labo.compartiments(jours, aujourdHui)
+        val c = Labo.compartiments(jours, aujourdHui, ecarts)
         val lignes = generateSequence(debut) { it.plusDays(1) }
             .takeWhile { !it.isAfter(aujourdHui) }
             .map { d ->
@@ -79,6 +83,13 @@ object TableAnalyse {
                 cellules += if (c != null && ic != null) nombre(sqrt(c.graisse.varNiveau(ic)), 3) else "NA"
                 cellules += if (c != null && ic != null) nombre(c.maigre.niveau(ic), 3) else "NA"
                 cellules += if (c != null && ic != null) nombre(sqrt(c.maigre.varNiveau(ic)), 3) else "NA"
+                val ie = eau?.index(d)
+                val ecart = ecarts[d]
+                cellules += nombre(j?.let(Labo::kcalRetenue), 0)
+                cellules += if (eau != null && ie != null) nombre(eau.niveau(ie), 3) else "NA"
+                cellules += nombre(ecart, 3)
+                cellules += nombre(j?.let { Labo.poidsCorrige(it, ecart) }, 3)
+                cellules += nombre(j?.let { Labo.graisseCorrigee(it, ecart) }, 3)
                 idsQuestions.forEach { cellules += e?.reponses?.get(it) ?: "NA" }
                 cellules += if (alcoolRepondu) e!!.boissons.size.toString() else "NA"
                 cellules += if (alcoolRepondu) nombre(e!!.unitesAlcool, 2) else "NA"
