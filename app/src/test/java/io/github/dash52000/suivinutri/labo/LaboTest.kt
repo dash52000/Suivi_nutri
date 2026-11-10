@@ -80,6 +80,18 @@ class LaboTest {
         assertEquals(1725.39, s5.apportsEstimes, 0.05)
         // Écart-type de référence 135,409 kcal/j : demi-largeur de l'IC = 1,96 × 135,409.
         assertEquals(1.959964 * 135.409, (s5.apports.haut - s5.apports.bas) / 2, 0.05)
+
+        // 7 jours glissants : un point par matin dès J7, et celui du lundi qui clôt la semaine 5 la reproduit.
+        assertEquals(64, r.glissants.size)
+        assertEquals(lundi.plusDays(7), r.glissants.first().fin)
+        assertEquals(lundi.plusDays(70), r.glissants.last().fin)
+        val lundi6 = r.glissants.first { it.fin == lundi.plusWeeks(6) }
+        assertEquals(s5.apports.estimation, lundi6.apports.estimation, 1e-9)
+        assertEquals(s5.apports.haut, lundi6.apports.haut, 1e-9)
+        assertEquals(s5.depenseMoyenne, lundi6.depenseMoyenne, 1e-9)
+        // Référence numpy : premiers points tirés par le démarrage du lisseur (1 810), puis 1 725,1 à 1 728,6.
+        assertTrue(r.glissants.drop(21).all { it.apports.estimation in 1725.0..1728.7 })
+        assertEquals(1728.567, r.glissants.last().apports.estimation, 0.01)
     }
 
     /**
@@ -167,6 +179,15 @@ class LaboTest {
         assertEquals(0.0303, graisseCorrigee, 1e-3)
         assertEquals(0.0340, graisseBrute, 1e-3)
         assertEquals(n, Labo.compartiments(jours(true), aujourdHui)!!.corriges.size)
+
+        // Décomposition de chaque pesée : part de l'eau = 0,73 × écart de l'eau, le reste = corrigée − tendance.
+        val r = Labo.analyser(jours(true), aujourdHui)
+        r.poids.forEach { p ->
+            val e = ecarts.getValue(p.date)
+            assertEquals(Labo.EAU_VERS_POIDS * e, p.partEau!!, 1e-9)
+            assertEquals(p.corrige!! - p.tendance, p.ecart!! - p.partEau!!, 1e-9)
+        }
+        assertNull(Labo.analyser(jours(false), aujourdHui).poids.first().partEau)
     }
 
     /** Jours sans montre : ni sommeil ni séance et moins de 2 000 kcal (Garmin ne compte que le métabolisme de base). */

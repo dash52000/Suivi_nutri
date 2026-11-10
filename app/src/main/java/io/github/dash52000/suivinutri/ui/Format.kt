@@ -1,6 +1,8 @@
 package io.github.dash52000.suivinutri.ui
 
 import io.github.dash52000.suivinutri.labo.Intervalle
+import io.github.dash52000.suivinutri.labo.PointPoids
+import kotlin.math.roundToLong
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -21,3 +23,18 @@ internal fun ic(i: Intervalle, decimales: Int, unite: String): String =
 internal fun pourcent(p: Double): String = String.format(Locale.FRENCH, "%.0f %%", p * 100)
 
 internal val formatCourt: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM", Locale.FRENCH)
+
+private fun auDixieme(x: Double): Double = (x * 10).roundToLong() / 10.0 + 0.0 // + 0.0 : pas de « −0,0 »
+
+/**
+ * « écart à la tendance +0,8 kg : eau +0,6 kg, reste +0,2 kg ». Le reste est calculé sur les valeurs arrondies,
+ * pour que la somme tombe juste. Null sans pesée retenue.
+ */
+internal fun texteEcartPesee(p: PointPoids): String? {
+    val ecart = p.ecart ?: return null
+    val e = auDixieme(ecart)
+    val base = "écart à la tendance ${signe(e, 1, "kg")}"
+    val eau = p.partEau ?: return "$base (eau non mesurée)"
+    val w = auDixieme(eau)
+    return "$base : eau ${signe(w, 1, "kg")}, reste ${signe(auDixieme(e - w), 1, "kg")}"
+}

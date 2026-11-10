@@ -46,6 +46,12 @@ jour qui s'installe par-dessus l'appli existante.
 - **Apports estimés sans composition** : dépense moyenne + Δ niveau lissé (lundi matin → lundi matin) × 7 700 ÷ 7,
   avec IC 95 % tiré de la covariance a posteriori des deux niveaux (covariance croisée du lisseur).
   Semaine complète : ≥ 3 pesées retenues et ≥ 5 jours de dépense. Semaine en cours dès 2 jours écoulés.
+- **Affichage des apports** (v1.8) : courbe des 7 jours glissants (pesée de J − 7 → pesée de J, dépense de
+  J − 7 à J − 1), un point par matin sur 90 jours, bande de l'IC à 95 %. Les semaines calendaires restent
+  la base des effets sur plusieurs semaines (périodes sans chevauchement).
+- **Pesée du jour décomposée** (v1.8) : écart à la tendance = part de l'eau (0,73 × écart de l'eau à sa
+  tendance) + reste ; dans l'onglet Données (chaque jour) et sous le graphe du poids, qui montre aussi
+  les pesées corrigées reliées aux brutes. Masqué avec l'option « masquer la pesée du jour ».
 - **Jours sans montre** (v1.7) : sans sommeil ni séance, une dépense sous 2 000 kcal n'est que le
   métabolisme de base compté par Garmin (1 565 ou 1 675 kcal) ; elle est écartée, comme toute dépense
   sous 800 kcal.
@@ -100,5 +106,7 @@ grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` re
 - **v1.7** : conclusions de l'analyse R — correction par l'eau du poids et de la graisse, corrélation
   graisse / maigre dans l'intervalle des apports, jours sans montre écartés de la dépense, faim au
   coucher et collation en pause par défaut (toujours « non » et toujours « oui »), réactivables
+- **v1.8** : apports sur 7 jours glissants (courbe), pesée du jour décomposée en eau et reste,
+  pesées corrigées de l'eau dans le graphe du poids, calcul du labo partagé entre Données et Labo
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

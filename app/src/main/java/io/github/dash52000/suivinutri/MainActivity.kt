@@ -149,7 +149,7 @@ fun App(health: HealthData, journal: Journal, config: Configuration) {
         val m = Modifier.padding(marges)
         when (onglet) {
             Onglet.SOIR -> EcranSoir(journal, config, health, m)
-            Onglet.DONNEES -> EcranDonnees(health, m)
+            Onglet.DONNEES -> EcranDonnees(health, journal, config, m)
             Onglet.LABO -> EcranLabo(health, journal, config, m)
             Onglet.REGLAGES -> EcranReglages(journal, config, health, m)
         }

@@ -60,7 +60,15 @@ data class PointPoids(
     /** Pesée écartée par le Kalman (aberrante). */
     val ecartee: Boolean,
     val apresMidi: Boolean,
-)
+    /** Pesée corrigée de l'eau du jour (null si la balance n'a pas mesuré l'eau). brut − corrigé = part de l'eau. */
+    val corrige: Double? = null,
+) {
+    /** Écart de la pesée à la tendance, null sans pesée ou si elle a été écartée. */
+    val ecart: Double? get() = if (brut == null || ecartee) null else brut - tendance
+
+    /** Part de l'écart due à l'eau : 0,73 × (eau du jour − tendance de l'eau). */
+    val partEau: Double? get() = if (ecart == null || corrige == null) null else brut!! - corrige
+}
 
 /**
  * Apports estimés d'une semaine (ou des jours écoulés de la semaine en cours) :
@@ -81,6 +89,16 @@ data class SemaineApports(
 ) {
     val apportsEstimes: Double get() = apports.estimation
 }
+
+/** Apports estimés sur les 7 jours qui finissent le matin de [fin] : pesée de [fin] − 7 → pesée de [fin]. */
+data class ApportsGlissants(
+    val fin: LocalDate,
+    val depenseMoyenne: Double,
+    val apports: Intervalle,
+    val methode: Methode,
+    val deltaGraisseKg: Double? = null,
+    val deltaMaigreKg: Double? = null,
+)
 
 /** Effet d'une exposition du jour J sur l'écart du poids à la tendance, à J+1 (avec IC), J+2 et J+3. */
 data class EffetLendemain(
@@ -137,6 +155,8 @@ data class ResultatLabo(
     val poids: List<PointPoids>,
     val composition: ResumeComposition? = null,
     val semaines: List<SemaineApports>,
+    /** 7 jours glissants, du plus ancien au plus récent ; trous les jours sans assez de données. */
+    val glissants: List<ApportsGlissants> = emptyList(),
     val lendemain: List<EffetLendemain>,
     val effetsSemaine: List<EffetSemaine>,
     val croises: List<EffetCroise>,
@@ -163,6 +183,9 @@ object Labo {
     const val MIN_JOURS_REGRESSION = 15
     private const val RETARD_JOURS = 2
     private const val KCAL_JOUR_MIN = 800.0
+
+    /** Profondeur des graphes du labo (poids, apports glissants). */
+    const val JOURS_AFFICHES = 90L
 
     /**
      * Sans sommeil ni séance, une journée sous 2 000 kcal est une journée sans montre : Garmin n'y compte que
@@ -369,7 +392,7 @@ object Labo {
         val lis = lissage(tries, aujourdHui, ecarts)
 
         val poids = if (lis == null) emptyList() else {
-            val depuis = maxOf(lis.debut, aujourdHui.minusDays(89))
+            val depuis = maxOf(lis.debut, aujourdHui.minusDays(JOURS_AFFICHES - 1))
             generateSequence(depuis) { it.plusDays(1) }
                 .takeWhile { !it.isAfter(aujourdHui) }
                 .mapNotNull { d ->
@@ -382,6 +405,7 @@ object Labo {
                         seTendance = sqrt(lis.varNiveau(i)),
                         ecartee = i in lis.ecartees,
                         apresMidi = (j?.heurePesee ?: 0) >= Kalman.HEURE_APRES_MIDI,
+                        corrige = j?.let { jl -> ecarts[d]?.let { e -> poidsCorrige(jl, e) } },
                     )
                 }
                 .toList()
@@ -399,6 +423,7 @@ object Labo {
             )
         }
         val semaines = if (lis == null) emptyList() else semaines(parDate, lis, comp, aujourdHui)
+        val glissants = if (lis == null) emptyList() else glissants(parDate, lis, comp, aujourdHui)
         val lendemain = lendemain(tries, parDate, lis)
         val effetsSemaine = effetsSemaine(parDate, semaines.filter { !it.enCours }, reflexes + reflexesPerso)
         val croises = croises(tries, parDate)
@@ -413,6 +438,7 @@ object Labo {
             poids = poids,
             composition = resume,
             semaines = semaines.sortedByDescending { it.lundi },
+            glissants = glissants,
             lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
             effetsSemaine = effetsSemaine.map { e -> if (e.effet?.p != null) e.copy(q = q.next()) else e },
             croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
@@ -421,9 +447,77 @@ object Labo {
     }
 
     /**
+     * Apports estimés entre le matin de [debut] et le matin de [debut] + [jours] : dépense moyenne des jours
+     * de la période + énergie stockée ou déstockée (compartiments si la balance a assez mesuré, sinon poids).
+     * [joursPesees] : jours dont les pesées comptent pour le minimum. Null si les minimums ne sont pas atteints.
+     */
+    private fun estimerPeriode(
+        parDate: Map<LocalDate, JourLabo>,
+        lis: Kalman.Lissage,
+        comp: Compartiments?,
+        debut: LocalDate,
+        jours: Int,
+        joursPesees: List<LocalDate>,
+        enCours: Boolean,
+        minPesees: Int,
+        minDepense: Int,
+    ): SemaineApports? {
+        val i = lis.index(debut) ?: return null
+        if (i + jours >= lis.n) return null
+        val periode = (0 until jours).map { debut.plusDays(it.toLong()) }
+        val pesees = joursPesees.count { peseeRetenue(lis, parDate, it) != null }
+        val kcal = periode.mapNotNull { d -> parDate[d]?.let { kcalRetenue(it) } }
+        if (pesees < minPesees || kcal.size < minDepense) return null
+        val delta = lis.niveau(i + jours) - lis.niveau(i)
+
+        // Par compartiments si la balance a donné assez de mesures sur la période, sinon par le poids.
+        val ic = comp?.graisse?.index(debut)
+        val joursCompo = joursPesees.filter { parDate[it]?.masseGrasse != null }
+        val mesuresCompo = joursCompo.size
+        val parCompo = comp != null && ic != null && ic + jours < comp.graisse.n && mesuresCompo >= minPesees
+        val estimation: Double
+        val se: Double
+        var dGraisse: Double? = null
+        var dMaigre: Double? = null
+        if (parCompo) {
+            val g = comp!!.graisse
+            val m = comp.maigre
+            dGraisse = g.niveau(ic!! + jours) - g.niveau(ic)
+            dMaigre = m.niveau(ic + jours) - m.niveau(ic)
+            estimation = kcal.average() + (KCAL_PAR_KG_GRAISSE * dGraisse + KCAL_PAR_KG_MAIGRE * dMaigre) / jours
+            // Les erreurs de la balance sur la graisse et le maigre sont corrélées (ce qu'elle retire à
+            // l'une, elle l'ajoute à l'autre) : −0,75 brutes, −0,15 corrigées par l'eau, au prorata des
+            // mesures corrigées de la période.
+            val part = joursCompo.count { it in comp.corriges }.toDouble() / mesuresCompo
+            val rho = RHO_COMPARTIMENTS_BRUT + (RHO_COMPARTIMENTS_CORRIGE - RHO_COMPARTIMENTS_BRUT) * part
+            val a = KCAL_PAR_KG_GRAISSE * sqrt(g.varDifference(ic, jours))
+            val b = KCAL_PAR_KG_MAIGRE * sqrt(m.varDifference(ic, jours))
+            se = sqrt(maxOf(0.0, a * a + b * b + 2 * rho * a * b)) / jours
+        } else {
+            val parKg = KCAL_PAR_KG / jours
+            estimation = kcal.average() + delta * parKg
+            se = sqrt(lis.varDifference(i, jours)) * parKg
+        }
+        return SemaineApports(
+            lundi = debut,
+            depenseMoyenne = kcal.average(),
+            deltaTendanceKg = delta,
+            apports = Intervalle(estimation, estimation - Stats.Z975 * se, estimation + Stats.Z975 * se),
+            nbPesees = pesees,
+            nbJoursDepense = kcal.size,
+            enCours = enCours,
+            nbJours = jours,
+            methode = if (parCompo) Methode.COMPOSITION else Methode.POIDS,
+            deltaGraisseKg = dGraisse,
+            deltaMaigreKg = dMaigre,
+        )
+    }
+
+    /**
      * Semaines complètes (lundi matin → lundi matin suivant) avec au moins 3 pesées retenues et 5 jours de
      * dépense, puis la semaine en cours dès 2 jours écoulés. Le niveau lissé du lundi matin reflète ce qui a
-     * été mangé jusqu'au dimanche soir.
+     * été mangé jusqu'au dimanche soir. Elles servent aux effets sur plusieurs semaines : des périodes qui ne se
+     * chevauchent pas.
      */
     private fun semaines(
         parDate: Map<LocalDate, JourLabo>,
@@ -433,70 +527,50 @@ object Labo {
     ): List<SemaineApports> {
         val resultat = mutableListOf<SemaineApports>()
         val lundiCourant = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-
-        fun estimer(lundi: LocalDate, jours: Int, enCours: Boolean, minPesees: Int, minDepense: Int) {
-            val i = lis.index(lundi) ?: return
-            if (i + jours >= lis.n) return
-            val periode = (0 until jours).map { lundi.plusDays(it.toLong()) }
-            // Semaine en cours : la pesée de ce matin compte aussi.
-            val joursPesees = if (enCours) periode + aujourdHui else periode
-            val pesees = joursPesees.count { peseeRetenue(lis, parDate, it) != null }
-            val kcal = periode.mapNotNull { d -> parDate[d]?.let { kcalRetenue(it) } }
-            if (pesees < minPesees || kcal.size < minDepense) return
-            val delta = lis.niveau(i + jours) - lis.niveau(i)
-
-            // Par compartiments si la balance a donné assez de mesures sur la période, sinon par le poids.
-            val ic = comp?.graisse?.index(lundi)
-            val joursCompo = joursPesees.filter { parDate[it]?.masseGrasse != null }
-            val mesuresCompo = joursCompo.size
-            val parCompo = comp != null && ic != null && ic + jours < comp.graisse.n && mesuresCompo >= minPesees
-            val estimation: Double
-            val se: Double
-            var dGraisse: Double? = null
-            var dMaigre: Double? = null
-            if (parCompo) {
-                val g = comp!!.graisse
-                val m = comp.maigre
-                dGraisse = g.niveau(ic!! + jours) - g.niveau(ic)
-                dMaigre = m.niveau(ic + jours) - m.niveau(ic)
-                estimation = kcal.average() + (KCAL_PAR_KG_GRAISSE * dGraisse + KCAL_PAR_KG_MAIGRE * dMaigre) / jours
-                // Les erreurs de la balance sur la graisse et le maigre sont corrélées (ce qu'elle retire à
-                // l'une, elle l'ajoute à l'autre) : −0,75 brutes, −0,15 corrigées par l'eau, au prorata des
-                // mesures corrigées de la période.
-                val part = joursCompo.count { it in comp.corriges }.toDouble() / mesuresCompo
-                val rho = RHO_COMPARTIMENTS_BRUT + (RHO_COMPARTIMENTS_CORRIGE - RHO_COMPARTIMENTS_BRUT) * part
-                val a = KCAL_PAR_KG_GRAISSE * sqrt(g.varDifference(ic, jours))
-                val b = KCAL_PAR_KG_MAIGRE * sqrt(m.varDifference(ic, jours))
-                se = sqrt(maxOf(0.0, a * a + b * b + 2 * rho * a * b)) / jours
-            } else {
-                val parKg = KCAL_PAR_KG / jours
-                estimation = kcal.average() + delta * parKg
-                se = sqrt(lis.varDifference(i, jours)) * parKg
-            }
-            resultat += SemaineApports(
-                lundi = lundi,
-                depenseMoyenne = kcal.average(),
-                deltaTendanceKg = delta,
-                apports = Intervalle(estimation, estimation - Stats.Z975 * se, estimation + Stats.Z975 * se),
-                nbPesees = pesees,
-                nbJoursDepense = kcal.size,
-                enCours = enCours,
-                nbJours = jours,
-                methode = if (parCompo) Methode.COMPOSITION else Methode.POIDS,
-                deltaGraisseKg = dGraisse,
-                deltaMaigreKg = dMaigre,
-            )
-        }
-
         var lundi = lis.debut.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
         while (lundi.isBefore(lundiCourant)) {
-            estimer(lundi, 7, enCours = false, minPesees = 3, minDepense = 5)
+            val periode = (0L until 7L).map { lundi.plusDays(it) }
+            estimerPeriode(parDate, lis, comp, lundi, 7, periode, enCours = false, minPesees = 3, minDepense = 5)
+                ?.let { resultat += it }
             lundi = lundi.plusWeeks(1)
         }
         val ecoules = ChronoUnit.DAYS.between(lundiCourant, aujourdHui).toInt()
-        if (ecoules >= 2) estimer(lundiCourant, ecoules, enCours = true, minPesees = 1, minDepense = 2)
+        if (ecoules >= 2) {
+            // Semaine en cours : la pesée de ce matin compte aussi.
+            val joursPesees = (0L..ecoules.toLong()).map { lundiCourant.plusDays(it) }
+            estimerPeriode(parDate, lis, comp, lundiCourant, ecoules, joursPesees, enCours = true, minPesees = 1, minDepense = 2)
+                ?.let { resultat += it }
+        }
         return resultat
     }
+
+    /**
+     * Apports des 7 jours glissants, pour chaque matin des [JOURS_AFFICHES] derniers jours : de la pesée de J − 7
+     * à celle de J (comprises), dépense de J − 7 à J − 1. Mêmes minimums qu'une semaine complète. Deux points
+     * voisins partagent 6 jours sur 7 : la courbe est lisse par construction.
+     */
+    private fun glissants(
+        parDate: Map<LocalDate, JourLabo>,
+        lis: Kalman.Lissage,
+        comp: Compartiments?,
+        aujourdHui: LocalDate,
+    ): List<ApportsGlissants> =
+        (JOURS_AFFICHES - 1L downTo 0L).mapNotNull { k ->
+            val fin = aujourdHui.minusDays(k)
+            val debut = fin.minusDays(7)
+            val joursPesees = (0L..7L).map { debut.plusDays(it) }
+            estimerPeriode(parDate, lis, comp, debut, 7, joursPesees, enCours = false, minPesees = 3, minDepense = 5)
+                ?.let { s ->
+                    ApportsGlissants(
+                        fin = fin,
+                        depenseMoyenne = s.depenseMoyenne,
+                        apports = s.apports,
+                        methode = s.methode,
+                        deltaGraisseKg = s.deltaGraisseKg,
+                        deltaMaigreKg = s.deltaMaigreKg,
+                    )
+                }
+        }
 
     private fun ecartPoids(parDate: Map<LocalDate, JourLabo>, date: LocalDate, k: Long): Double? {
         val avant = parDate[date]?.poids ?: return null

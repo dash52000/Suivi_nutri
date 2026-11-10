@@ -31,9 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Configuration
-import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
-import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
@@ -42,13 +40,8 @@ import io.github.dash52000.suivinutri.labo.Labo
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
 import io.github.dash52000.suivinutri.labo.Stats
-import io.github.dash52000.suivinutri.labo.collecterJours
 import io.github.dash52000.suivinutri.labo.Qualite
 import io.github.dash52000.suivinutri.labo.ResultatLabo
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.time.Duration
-import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -57,72 +50,28 @@ import java.util.Locale
 
 private sealed interface EtatLabo {
     data object Chargement : EtatLabo
-    data class Pret(
-        val resultat: ResultatLabo,
-        val calendrier: List<LigneCalendrier>,
-        val dates28: List<LocalDate>,
-    ) : EtatLabo
+    data class Pret(val calcul: CalculLabo.Calcul) : EtatLabo {
+        val resultat: ResultatLabo get() = calcul.resultat
+        val calendrier: List<LigneCalendrier> get() = calcul.calendrier
+        val dates28: List<LocalDate> get() = calcul.dates28
+    }
     data class Erreur(val message: String) : EtatLabo
 }
 
-/**
- * Dernier calcul du labo, gardé tant que l'appli tourne : changer d'onglet ne relance pas
- * la lecture d'un an de Health Connect. Recalcul si le jour, le journal ou les questions changent,
- * si le calcul a plus de 3 heures, ou à la demande.
- */
-private object CacheLabo {
-    var etat: EtatLabo.Pret? = null
-    var cle: String = ""
-    var calculeLe: Instant = Instant.EPOCH
-}
-
-private const val DUREE_CACHE_HEURES = 3L
 private val formatHeure = DateTimeFormatter.ofPattern("HH:mm", Locale.FRENCH)
-
-private fun cleCache(journal: Journal, config: Configuration): String =
-    "${LocalDate.now()}|${journal.derniereModification()}|${config.signature()}"
-
-private fun cacheValide(cle: String): EtatLabo.Pret? {
-    val etat = CacheLabo.etat ?: return null
-    val age = Duration.between(CacheLabo.calculeLe, Instant.now())
-    return if (CacheLabo.cle == cle && age < Duration.ofHours(DUREE_CACHE_HEURES)) etat else null
-}
 
 @Composable
 fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
-    var etat by remember { mutableStateOf<EtatLabo>(cacheValide(cleCache(journal, config)) ?: EtatLabo.Chargement) }
+    var etat by remember {
+        mutableStateOf<EtatLabo>(CalculLabo.enCache(journal, config)?.let { EtatLabo.Pret(it) } ?: EtatLabo.Chargement)
+    }
     var forcer by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
 
     LaunchedEffect(forcer) {
-        val cle = cleCache(journal, config)
-        if (forcer == 0) {
-            val enCache = cacheValide(cle)
-            if (enCache != null) {
-                etat = enCache
-                Usage.log(context, "labo", "cache")
-                return@LaunchedEffect
-            }
-        }
-        Usage.log(context, "labo", if (forcer == 0) "calcul_auto" else "calcul_force")
-        etat = EtatLabo.Chargement
+        if (forcer > 0 || etat !is EtatLabo.Pret) etat = EtatLabo.Chargement
         etat = try {
-            val aujourdHui = LocalDate.now()
-            val jours = collecterJours(health, journal, aujourdHui)
-            val entrees = journal.toutes()
-            val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
-            val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
-            val pret = withContext(Dispatchers.Default) {
-                EtatLabo.Pret(
-                    resultat = Labo.analyser(jours, aujourdHui, perso),
-                    calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),
-                    dates28 = dates28,
-                )
-            }
-            CacheLabo.etat = pret
-            CacheLabo.cle = cle
-            CacheLabo.calculeLe = Instant.now()
-            pret
+            EtatLabo.Pret(CalculLabo.obtenir(context, health, journal, config, forcer = forcer > 0, origine = "labo"))
         } catch (e: SecurityException) {
             EtatLabo.Erreur("Le labo a besoin de l'accès à Health Connect : autorise-le depuis l'onglet Données.")
         } catch (e: Exception) {
@@ -147,8 +96,8 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
         }
         if (etat is EtatLabo.Pret) {
             Text(
-                "Calculé à ${CacheLabo.calculeLe.atZone(ZoneId.systemDefault()).format(formatHeure)}. " +
-                    "Recalcul automatique si tu réponds au questionnaire, sinon toutes les $DUREE_CACHE_HEURES heures.",
+                "Calculé à ${(etat as EtatLabo.Pret).calcul.calculeLe.atZone(ZoneId.systemDefault()).format(formatHeure)}. " +
+                    "Recalcul automatique si tu réponds au questionnaire, sinon toutes les ${CalculLabo.DUREE_CACHE_HEURES} heures.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -200,11 +149,20 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
     Section(
         "Poids",
         (if (masquerPesee) "La tendance, sans les pesées du jour. "
-        else "Des points pour les pesées (vides : écartées), un trait pour la tendance. ") +
-            "La bande donne son incertitude à 95 % : elle s'élargit quand tu ne te pèses pas. Quand la balance " +
-            "mesure l'eau, la tendance suit le poids corrigé de l'eau du jour (repas salé, glycogène).",
+        else "Des points gris pour les pesées (vides : écartées), un trait pour la tendance. Quand la balance " +
+            "mesure l'eau, un point en couleur donne la pesée corrigée de l'eau du jour (repas salé, glycogène), " +
+            "relié à la pesée brute : la longueur du trait, c'est l'eau. ") +
+            "La bande donne l'incertitude de la tendance à 95 % : elle s'élargit quand tu ne te pèses pas. " +
+            "La tendance suit les pesées corrigées quand il y en a.",
     ) {
         GraphePoids(r.poids, masquerPesee)
+        val derniere = r.poids.lastOrNull { it.ecart != null }
+        if (derniere != null && !masquerPesee) {
+            Text(
+                "Pesée du ${derniere.date.format(formatCourt)} : ${texteEcartPesee(derniere)}.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
         val c = r.composition
         if (c != null && !masquerPesee) {
             Text(
@@ -222,20 +180,22 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
             "maigre × 1 816 kcal/kg (l'eau et le glycogène ne comptent presque plus comme de la graisse). " +
             "Sans composition : variation du poids × 7 700 kcal/kg. Intervalle à 95 % lié aux mesures. " +
             "Les jours sans montre (ni sommeil ni séance, moins de 2 000 kcal) sont écartés de la dépense. " +
+            "Chaque point de la courbe couvre les 7 jours qui précèdent ce matin-là (pesée de J − 7 → pesée " +
+            "de J) : deux points voisins partagent 6 jours, la courbe est lisse par construction. " +
             "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
-            "fie-toi aux variations d'une semaine à l'autre, pas au chiffre brut.",
+            "fie-toi aux variations, pas au chiffre brut.",
     ) {
-        if (r.semaines.isEmpty()) {
+        if (r.glissants.isEmpty()) {
             Ligne(
-                "Pas encore de semaine exploitable : il faut au moins 3 pesées et 5 jours de dépense avec la montre dans la " +
-                    "semaine (pour la semaine en cours, 2 jours écoulés et une pesée suffisent)."
+                "Pas encore assez de données : il faut au moins 3 pesées et 5 jours de dépense avec la montre " +
+                    "sur les 7 derniers jours."
             )
         } else {
-            GrapheSemaines(r.semaines)
-            val derniere = r.semaines.first()
+            GrapheGlissants(r.glissants)
+            val derniere = r.glissants.last()
             Text(
-                (if (derniere.enCours) "Semaine en cours (${derniere.nbJours} jours) : " else "Semaine du ${derniere.lundi.format(formatCourt)} : ") +
-                    "apports ≈ ${nombre(Math.round(derniere.apportsEstimes / 50.0) * 50.0, 0)} kcal/j " +
+                (if (derniere.fin == etat.dates28.last()) "7 derniers jours : " else "7 jours jusqu'au ${derniere.fin.format(formatCourt)} : ") +
+                    "apports ≈ ${nombre(Math.round(derniere.apports.estimation / 50.0) * 50.0, 0)} kcal/j " +
                     "(${ic(derniere.apports, 0, "kcal/j").replace("+", "")}) pour une dépense de " +
                     "${nombre(derniere.depenseMoyenne, 0)}. Calcul : ${derniere.methode.libelle}" +
                     (derniere.deltaGraisseKg?.let { g ->
@@ -354,7 +314,8 @@ private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
     }
     // L'échelle suit la tendance et les pesées ; la bande est coupée aux bords si elle déborde.
     val valeurs = points.flatMap {
-        if (masquerPesee) listOf(it.tendance) else listOfNotNull(if (it.ecartee) null else it.brut, it.tendance)
+        if (masquerPesee) listOf(it.tendance)
+        else listOfNotNull(if (it.ecartee) null else it.brut, if (it.ecartee) null else it.corrige, it.tendance)
     }
     val min = valeurs.min() - 0.5
     val max = valeurs.max() + 0.5
@@ -363,6 +324,7 @@ private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
     val etendue = maxOf(1L, ChronoUnit.DAYS.between(debut, fin)).toFloat()
     val couleurTendance = MaterialTheme.colorScheme.primary
     val couleurPesees = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    val couleurCorrigees = MaterialTheme.colorScheme.tertiary
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -399,6 +361,13 @@ private fun GraphePoids(points: List<PointPoids>, masquerPesee: Boolean) {
                         drawCircle(couleurPesees, radius = 3.5.dp.toPx(), center = centre, style = Stroke(1.5.dp.toPx()))
                     } else {
                         drawCircle(couleurPesees.copy(alpha = if (p.apresMidi) 0.25f else 0.5f), radius = 3.dp.toPx(), center = centre)
+                    }
+                    // Pesée corrigée de l'eau, reliée à la brute : la longueur du trait, c'est l'eau du jour.
+                    val corrige = p.corrige
+                    if (corrige != null && !p.ecartee) {
+                        val c = Offset(centre.x, y(corrige))
+                        drawLine(couleurCorrigees.copy(alpha = 0.4f), centre, c, strokeWidth = 1.5.dp.toPx())
+                        drawCircle(couleurCorrigees.copy(alpha = 0.8f), radius = 2.5.dp.toPx(), center = c)
                     }
                 }
                 val chemin = Path()

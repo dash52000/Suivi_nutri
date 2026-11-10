@@ -31,9 +31,13 @@ import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import io.github.dash52000.suivinutri.data.Affichage
+import io.github.dash52000.suivinutri.data.Configuration
+import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.DiagnosticCalories
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.health.Journee
+import io.github.dash52000.suivinutri.labo.PointPoids
+import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -73,9 +77,13 @@ private suspend fun charger(context: Context, health: HealthData, demandeFaite: 
 }
 
 @Composable
-fun EcranDonnees(health: HealthData, modifier: Modifier = Modifier) {
+fun EcranDonnees(health: HealthData, journal: Journal, config: Configuration, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var etat by remember { mutableStateOf<EtatDonnees>(EtatDonnees.Chargement) }
+    // Pesées vues par le labo (tendance, part de l'eau), par date ; vide tant que le calcul n'est pas prêt.
+    var pesees by remember {
+        mutableStateOf(CalculLabo.enCache(journal, config)?.resultat?.poids?.associateBy { it.date } ?: emptyMap())
+    }
     var rafraichir by remember { mutableIntStateOf(0) }
     var demandeFaite by remember { mutableStateOf(false) }
 
@@ -92,6 +100,18 @@ fun EcranDonnees(health: HealthData, modifier: Modifier = Modifier) {
             charger(context, health, demandeFaite)
         } catch (e: Exception) {
             EtatDonnees.Erreur(e.message ?: e.toString())
+        }
+        // Puis la décomposition des pesées, qui demande la tendance du labo (partagée avec l'onglet Labo).
+        // « Actualiser » relance le calcul, pour prendre la pesée du matin.
+        if (etat is EtatDonnees.Donnees) {
+            try {
+                val calcul = CalculLabo.obtenir(context, health, journal, config, forcer = rafraichir > 0, origine = "donnees")
+                pesees = calcul.resultat.poids.associateBy { it.date }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Sans le labo, les cartes restent sans décomposition.
+            }
         }
     }
 
@@ -129,6 +149,7 @@ fun EcranDonnees(health: HealthData, modifier: Modifier = Modifier) {
 
             is EtatDonnees.Donnees -> ListeDonnees(
                 e,
+                pesees = pesees,
                 masquerPesee = Affichage.masquerPesee(context),
                 onActualiser = { rafraichir++ },
                 onComposition = { demanderAcces.launch(HealthData.PERMISSIONS_COMPOSITION) },
@@ -152,6 +173,7 @@ private fun Message(titre: String, texte: String, bouton: String?, action: () ->
 @Composable
 private fun ListeDonnees(
     etat: EtatDonnees.Donnees,
+    pesees: Map<LocalDate, PointPoids>,
     masquerPesee: Boolean,
     onActualiser: () -> Unit,
     onComposition: () -> Unit,
@@ -189,7 +211,7 @@ private fun ListeDonnees(
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
-        items(etat.jours, key = { it.date.toString() }) { CarteJour(it, masquerPesee) }
+        items(etat.jours, key = { it.date.toString() }) { CarteJour(it, pesees[it.date], masquerPesee) }
         item {
             OutlinedButton(onClick = onActualiser, modifier = Modifier.padding(top = 8.dp)) {
                 Text("Actualiser")
@@ -222,7 +244,7 @@ private fun CarteDiagnostic(d: DiagnosticCalories) {
 }
 
 @Composable
-private fun CarteJour(j: Journee, masquerPesee: Boolean) {
+private fun CarteJour(j: Journee, pesee: PointPoids?, masquerPesee: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
@@ -241,6 +263,14 @@ private fun CarteJour(j: Journee, masquerPesee: Boolean) {
                 ).joinToString("  ·  "),
                 style = MaterialTheme.typography.bodyMedium,
             )
+            val decomposition = pesee?.let { texteEcartPesee(it) }
+            if (!masquerPesee && j.poidsKg != null && decomposition != null) {
+                Text(
+                    decomposition.replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
             if (!masquerPesee && (j.graissePct != null || j.eauKg != null)) {
                 Text(
                     listOfNotNull(
