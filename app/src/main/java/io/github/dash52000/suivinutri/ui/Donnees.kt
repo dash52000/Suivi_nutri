@@ -82,7 +82,9 @@ fun EcranDonnees(health: HealthData, journal: Journal, config: Configuration, mo
     var etat by remember { mutableStateOf<EtatDonnees>(EtatDonnees.Chargement) }
     // Pesées vues par le labo (tendance, part de l'eau), par date ; vide tant que le calcul n'est pas prêt.
     var pesees by remember {
-        mutableStateOf(CalculLabo.enCache(journal, config)?.resultat?.poids?.associateBy { it.date } ?: emptyMap())
+        mutableStateOf<Map<LocalDate, PointPoids>>(
+            CalculLabo.enCache(journal, config)?.resultat?.poids?.associateBy { it.date } ?: emptyMap()
+        )
     }
     var rafraichir by remember { mutableIntStateOf(0) }
     var demandeFaite by remember { mutableStateOf(false) }
