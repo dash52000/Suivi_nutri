@@ -41,6 +41,10 @@ data class SemaineCap(
     val minutesSeances: Long,
     /** Dépense moyenne des jours avec la montre. */
     val depenseMoyenne: Double?,
+    /** Pas hors sport moyens des jours finis avec la montre (v1.10), et jours au-dessus de la cible. */
+    val pasHorsSport: Double? = null,
+    val joursPas: Int = 0,
+    val joursCiblePas: Int = 0,
 )
 
 /** Soir de la semaine qui dérape le plus, sur les 8 dernières semaines. */
@@ -75,6 +79,9 @@ data class ResultatCap(
     val budgetCourant: Int,
     /** Leviers proposés pour la semaine : les réflexes les moins tenus des 14 derniers jours. */
     val propositions: List<String>,
+    /** Médiane des pas hors sport sur les 8 semaines avant le départ, et cible = base + 2 000 (v1.10). */
+    val basePas: Double? = null,
+    val ciblePas: Double? = null,
 ) {
     val semaineEnCours: SemaineCap get() = semaines.last()
     val semainesFinies: List<SemaineCap> get() = semaines.filter { !it.enCours }
@@ -99,6 +106,9 @@ object Cap {
     const val CL_BOUTEILLE = 33.0
 
     val STYLES_BIERE = setOf("pils", "blonde", "dubbel", "tripel", "quadrupel")
+
+    /** Levier lu dans Health Connect, pas dans le questionnaire (v1.10). */
+    const val LEVIER_PAS = "Journée · pas hors sport ≥ cible"
 
     fun lundiDe(d: LocalDate): LocalDate = d.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
 
@@ -178,16 +188,40 @@ object Cap {
         aujourdHui: LocalDate,
         reflexes: List<Pair<String, (EntreeJour) -> Double?>>,
         n: Int = NB_PROPOSITIONS,
+        /** Leviers mesurés autrement (les pas) : libellé, taux tenu, nombre de jours. */
+        autres: List<Triple<String, Double, Int>> = emptyList(),
     ): List<String> {
         val dates = (0 until JOURS_PROPOSITIONS).map { aujourdHui.minusDays(it) }
-        return reflexes
+        return (reflexes
             .mapNotNull { (libelle, score) ->
                 val s = dates.mapNotNull { d -> entrees[d]?.let(score) }
                 if (s.size >= MIN_REPONSES_PROPOSITION) Triple(libelle, s.sum() / s.size, s.size) else null
-            }
+            } + autres.filter { it.third >= MIN_REPONSES_PROPOSITION })
             .sortedWith(compareBy<Triple<String, Double, Int>> { it.second }.thenByDescending { it.third })
             .take(n)
             .map { it.first }
+    }
+
+    // ---------- Pas hors sport (v1.10) ----------
+
+    /** Pas hors sport d'un jour fini avec la montre portée (au moins [Pas.MIN_PAS_JOUR] pas), sinon null. */
+    fun pasRetenus(j: JourLabo?, aujourdHui: LocalDate): Long? {
+        if (j == null || !j.date.isBefore(aujourdHui)) return null
+        val h = j.pasHorsSport ?: return null
+        return if ((j.pasTotal ?: 0L) >= Pas.MIN_PAS_JOUR) h else null
+    }
+
+    /**
+     * Médiane des pas hors sport sur les 8 semaines avant [lundiDepart] ; à défaut (moins de 14 jours), sur les
+     * 8 premières semaines de données. Null avec moins de 14 jours en tout.
+     */
+    fun basePas(jours: List<JourLabo>, lundiDepart: LocalDate, aujourdHui: LocalDate): Double? {
+        val retenus = jours.sortedBy { it.date }.mapNotNull { j -> pasRetenus(j, aujourdHui)?.let { j.date to it.toDouble() } }
+        val avant = retenus.filter { (d, _) -> d.isBefore(lundiDepart) && !d.isBefore(lundiDepart.minusWeeks(Pas.SEMAINES_BASE)) }
+        if (avant.size >= Pas.MIN_JOURS_BASE) return Pas.mediane(avant.map { it.second })
+        val premier = retenus.firstOrNull()?.first ?: return null
+        val debut = retenus.filter { (d, _) -> d.isBefore(premier.plusWeeks(Pas.SEMAINES_BASE)) }
+        return if (debut.size >= Pas.MIN_JOURS_BASE) Pas.mediane(debut.map { it.second }) else null
     }
 
     // ---------- Soir qui dérape ----------
@@ -307,6 +341,8 @@ object Cap {
         }
 
         val budgets = budgets(brutes.filter { !it.enCours }.map { it.verdict }, etat.budgetInitial)
+        val base = basePas(jours, lundiDepart, aujourdHui)
+        val cible = base?.let { it + Pas.PAS_EN_PLUS }
 
         val semaines = brutes.mapIndexed { idx, b ->
             val dates = (0L..6L).map { b.lundi.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
@@ -314,6 +350,8 @@ object Cap {
             val joursLabo = dates.mapNotNull { parDate[it] }
             val kcal = joursLabo.mapNotNull { Labo.kcalRetenue(it) }
             val levier = etat.leviers[b.lundi]
+            val pas = dates.mapNotNull { pasRetenus(parDate[it], aujourdHui) }
+            val joursCible = if (cible == null) 0 else pas.count { it >= cible }
             SemaineCap(
                 lundi = b.lundi,
                 nbJours = b.nbJours,
@@ -325,10 +363,16 @@ object Cap {
                 bieres = if (bieres.isEmpty()) null else bieres.sum(),
                 joursAlcool = bieres.size,
                 levier = levier,
-                adherence = levier?.let { scores[it] }?.let { adherence(entrees, dates, it) },
+                adherence = when {
+                    levier == LEVIER_PAS -> if (cible == null || pas.isEmpty()) null else Adherence(joursCible.toDouble(), pas.size)
+                    else -> levier?.let { scores[it] }?.let { adherence(entrees, dates, it) }
+                },
                 nbSeances = joursLabo.sumOf { it.nbSeances ?: 0 },
                 minutesSeances = joursLabo.sumOf { it.minutesSeances ?: 0L },
                 depenseMoyenne = if (kcal.isEmpty()) null else kcal.average(),
+                pasHorsSport = if (pas.isEmpty()) null else pas.average(),
+                joursPas = pas.size,
+                joursCiblePas = joursCible,
             )
         }
 
@@ -346,7 +390,12 @@ object Cap {
             penteDepuisDebut = depuisDebut,
             semaines = semaines,
             budgetCourant = semaines.last().budget,
-            propositions = propositions(entrees, aujourdHui, reflexes),
+            propositions = propositions(entrees, aujourdHui, reflexes, autres = listOfNotNull(cible?.let { c ->
+                val p = (0 until JOURS_PROPOSITIONS).mapNotNull { pasRetenus(parDate[aujourdHui.minusDays(it)], aujourdHui) }
+                if (p.isEmpty()) null else Triple(LEVIER_PAS, p.count { it >= c }.toDouble() / p.size, p.size)
+            })),
+            basePas = base,
+            ciblePas = cible,
         )
     }
 }

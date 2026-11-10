@@ -32,6 +32,8 @@ object TableAnalyse {
     /** v1.9 : objectif de perte, en fin de ligne (le coach ignore les colonnes qu'il ne lit pas). */
     private val COLONNES_OBJECTIF = listOf(
         "levier_semaine", "budget_bieres", "bieres_eq33", "plan_bieres", "plan_repas_dehors", "nb_seances",
+        // v1.10 : pas de la montre, et sans ceux des séances.
+        "pas_total", "pas_hors_sport",
     )
 
     /** Texte libre (libellé d'un levier) : entre guillemets, guillemets doublés. */
@@ -55,7 +57,7 @@ object TableAnalyse {
         val lis = Labo.lissage(jours, aujourdHui, ecarts)
 
         val avecDonnees = jours.filter {
-            it.poids != null || it.kcal != null || it.sommeilMin != null || it.entree?.vide == false
+            it.poids != null || it.kcal != null || it.sommeilMin != null || it.pasTotal != null || it.entree?.vide == false
         }
         val debut = (avecDonnees.map { it.date } + listOfNotNull(lis?.debut)).minOrNull()
             ?: return entete + "\n"
@@ -123,6 +125,8 @@ object TableAnalyse {
                 cellules += plan?.bieresPrevues(d)?.toString() ?: "NA"
                 cellules += plan?.repasDehorsPrevus(d)?.toString() ?: "NA"
                 cellules += j?.nbSeances?.toString() ?: "NA"
+                cellules += j?.pasTotal?.toString() ?: "NA"
+                cellules += j?.pasHorsSport?.toString() ?: "NA"
                 cellules.joinToString(",")
             }
             .toList()

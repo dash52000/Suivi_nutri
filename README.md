@@ -43,6 +43,12 @@ Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'in
 - **Signal de la semaine** : une notif au plus par semaine, à 18 h, le soir qui dérape le plus sur 8 semaines
   (rab, part normale de dessert ou ≥ 2 unités d'alcool ; au moins 3 soirs renseignés et 50 % de dérapages) ;
   vendredi par défaut, pour le plan du week-end. Désactivable.
+- **Pas hors sport** (v1.10) : pas Garmin du jour moins les pas faits pendant les séances (une tranche à
+  cheval sur une séance est coupée au prorata ; séances qui se chevauchent comptées une fois). Jours finis avec
+  au moins 1 000 pas seulement. Base = médiane des 8 semaines avant le départ (à défaut, des 8 premières semaines
+  de données, au moins 14 jours) ; cible = base + 2 000. Chaque semaine : moyenne et jours au-dessus de la cible ;
+  levier possible « pas hors sport ≥ cible ». Données affiche la taille des tranches reçues hier (fines : la
+  soustraction est propre ; longues : prorata approximatif). Autorisation Health Connect facultative.
 - **Activité** : chaque semaine affiche séances, minutes et dépense moyenne (jours avec montre). Flux unique
   Suivi_nutri → coach running par l'export CSV ; pas de lecture du plan d'entraînement.
 
@@ -107,7 +113,7 @@ eau, os) et leurs tendances, toutes les réponses, nombre de boissons et unités
 dépense retenue (`kcal_retenue`, NA les jours sans montre), tendance et écart de l'eau, poids et masse
 grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` reste pesée brute − tendance).
 Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_bieres`, `bieres_eq33`,
-`plan_bieres`, `plan_repas_dehors`, `nb_seances`.
+`plan_bieres`, `plan_repas_dehors`, `nb_seances` ; depuis la v1.10 : `pas_total`, `pas_hors_sport` (Garmin).
 
 ## Feuille de route
 
@@ -136,5 +142,7 @@ Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_b
   pesées corrigées de l'eau dans le graphe du poids, calcul du labo partagé entre Données et Labo
 - **v1.9** : objectif de perte, onglet Cap — couloir de pente, levier de la semaine, plan du week-end,
   budget bière ajusté par la pente, signal de la semaine, colonnes de l'objectif dans l'export
+- **v1.10** : pas hors sport (lecture des pas, soustraction des séances, base et cible, levier, diagnostic
+  des tranches, colonnes `pas_total` et `pas_hors_sport`)
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

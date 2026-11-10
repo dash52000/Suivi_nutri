@@ -136,8 +136,9 @@ fun EcranCap(
 
         CarteSemaine(
             s = resultat.semaineEnCours,
+            ciblePas = resultat.ciblePas,
             propositions = resultat.propositions,
-            tous = reflexes.map { it.first },
+            tous = reflexes.map { it.first } + Cap.LEVIER_PAS,
             onChoisir = { libelle ->
                 objectif.choisirLevier(resultat.semaineEnCours.lundi, libelle)
                 Usage.log(context, "levier", "semaine=${resultat.semaineEnCours.lundi};levier=${libelle ?: "retire"}")
@@ -170,7 +171,7 @@ fun EcranCap(
         val finies = resultat.semainesFinies.asReversed()
         if (finies.isNotEmpty()) {
             Text("Les semaines", style = MaterialTheme.typography.titleMedium)
-            finies.forEach { CarteSemaineFinie(it) }
+            finies.forEach { CarteSemaineFinie(it, resultat.ciblePas) }
         }
 
         Texte(
@@ -208,6 +209,12 @@ private fun texteActivite(s: SemaineCap): String =
     "Activité : ${s.nbSeances} séance(s), ${s.minutesSeances} min" +
         (s.depenseMoyenne?.let { " · dépense ${nombre(it, 0)} kcal/j" } ?: "")
 
+private fun textePas(s: SemaineCap, cible: Double?): String? {
+    val p = s.pasHorsSport ?: return null
+    return "Pas hors sport : ${nombre(p, 0)} par jour" +
+        (cible?.let { " · ${s.joursCiblePas} jour(s) sur ${s.joursPas} au-dessus de ${nombre(it, 0)}" } ?: "")
+}
+
 private fun textePente(s: SemaineCap): String {
     val p = s.pente ?: return if (s.enCours) "Pente : dès 2 jours écoulés" else "Pente : pas assez de pesées"
     return "Pente : ${signe(p.estimation, 2, "kg/sem.")} (${ic(p, 2, "kg").removePrefix("IC 95 % : ")})" +
@@ -232,6 +239,13 @@ private fun CarteCap(r: ResultatCap, poids: List<PointPoids>) {
                 style = MaterialTheme.typography.bodySmall,
             )
             GrapheCap(r, poids)
+            r.basePas?.let { b ->
+                Text(
+                    "Pas hors sport : base ${nombre(b, 0)} par jour (8 semaines avant le départ), cible " +
+                        "${nombre(r.ciblePas ?: b, 0)}.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             val p = r.penteDepuisDebut
             Text(
                 if (p == null) "Pente depuis le départ : au bout d'une semaine."
@@ -315,6 +329,7 @@ private fun GrapheCap(r: ResultatCap, poids: List<PointPoids>) {
 @Composable
 private fun CarteSemaine(
     s: SemaineCap,
+    ciblePas: Double?,
     propositions: List<String>,
     tous: List<String>,
     onChoisir: (String?) -> Unit,
@@ -361,6 +376,7 @@ private fun CarteSemaine(
 
             Text(texteBieres(s), style = MaterialTheme.typography.bodyMedium)
             Text(texteActivite(s), style = MaterialTheme.typography.bodySmall)
+            textePas(s, ciblePas)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(textePente(s), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             }
@@ -451,7 +467,7 @@ private fun CarteBilanPlan(b: BilanPlan) {
 }
 
 @Composable
-private fun CarteSemaineFinie(s: SemaineCap) {
+private fun CarteSemaineFinie(s: SemaineCap, ciblePas: Double?) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -462,6 +478,7 @@ private fun CarteSemaineFinie(s: SemaineCap) {
             texteLevier(s)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Text(texteBieres(s), style = MaterialTheme.typography.bodySmall)
             Text(texteActivite(s), style = MaterialTheme.typography.bodySmall)
+            textePas(s, ciblePas)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

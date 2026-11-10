@@ -36,6 +36,7 @@ import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.DiagnosticCalories
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.health.Journee
+import io.github.dash52000.suivinutri.labo.DiagnosticPas
 import io.github.dash52000.suivinutri.labo.PointPoids
 import kotlinx.coroutines.CancellationException
 import java.time.LocalDate
@@ -53,6 +54,9 @@ sealed interface EtatDonnees {
         val historique: Boolean,
         /** Composition corporelle (balance Withings) pas encore autorisée. */
         val compositionManquante: Boolean = false,
+        /** Pas (v1.10) pas encore autorisés ; sinon taille des tranches de pas d'hier. */
+        val pasManquants: Boolean = false,
+        val diagnosticPas: DiagnosticPas? = null,
     ) : EtatDonnees
     data class Erreur(val message: String) : EtatDonnees
 }
@@ -73,6 +77,8 @@ private suspend fun charger(context: Context, health: HealthData, demandeFaite: 
         diagnostic = health.diagnosticCalories(aujourdHui.minusDays(1)),
         historique = HealthData.PERMISSION_HISTORIQUE in accordees,
         compositionManquante = !accordees.containsAll(HealthData.PERMISSIONS_COMPOSITION),
+        pasManquants = !accordees.containsAll(HealthData.PERMISSIONS_PAS),
+        diagnosticPas = health.diagnosticPas(aujourdHui.minusDays(1)),
     )
 }
 
@@ -155,6 +161,7 @@ fun EcranDonnees(health: HealthData, journal: Journal, config: Configuration, mo
                 masquerPesee = Affichage.masquerPesee(context),
                 onActualiser = { rafraichir++ },
                 onComposition = { demanderAcces.launch(HealthData.PERMISSIONS_COMPOSITION) },
+                onPas = { demanderAcces.launch(HealthData.PERMISSIONS_PAS) },
             )
         }
     }
@@ -179,6 +186,7 @@ private fun ListeDonnees(
     masquerPesee: Boolean,
     onActualiser: () -> Unit,
     onComposition: () -> Unit,
+    onPas: () -> Unit,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -205,7 +213,20 @@ private fun ListeDonnees(
                 }
             }
         }
+        if (etat.pasManquants) item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Pas", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Autorise la lecture des pas envoyés par Garmin : l'onglet Cap en tire tes pas hors sport.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onPas) { Text("Autoriser les pas") }
+                }
+            }
+        }
         item { CarteDiagnostic(etat.diagnostic) }
+        etat.diagnosticPas?.let { d -> item { CarteDiagnosticPas(d) } }
         item {
             Text(
                 "14 derniers jours",
@@ -246,6 +267,33 @@ private fun CarteDiagnostic(d: DiagnosticCalories) {
 }
 
 @Composable
+private fun CarteDiagnosticPas(d: DiagnosticPas) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Tranches de pas — hier", style = MaterialTheme.typography.titleSmall)
+            if (d.nbTranches == 0) {
+                Text("Aucune tranche de pas Garmin reçue hier.")
+            } else {
+                Text(
+                    "${d.nbTranches} tranches Garmin, durée médiane ${String.format(Locale.FRENCH, "%.0f", d.dureeMedianeMin ?: 0.0)} min, " +
+                        "la plus longue ${String.format(Locale.FRENCH, "%.0f", d.dureeMaxMin ?: 0.0)} min."
+                )
+                Text("Pas : ${d.total}, hors sport : ${d.horsSport}.")
+                Text(
+                    if ((d.dureeMedianeMin ?: 0.0) <= 30.0) "Tranches fines : la soustraction des séances est propre."
+                    else "Tranches longues : les pas des séances sont retirés au prorata, c'est approximatif.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Text(
+                "Sources : " + d.sources.ifEmpty { listOf("aucune") }.joinToString(),
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+@Composable
 private fun CarteJour(j: Journee, pesee: PointPoids?, masquerPesee: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -263,6 +311,10 @@ private fun CarteJour(j: Journee, pesee: PointPoids?, masquerPesee: Boolean) {
                     kcal(j.kcalTotal),
                     j.sommeilMin?.let { "Sommeil ${dureeHeures(it)}" } ?: "Sommeil —",
                 ).joinToString("  ·  "),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (j.pasTotal != null) Text(
+                "${j.pasTotal} pas, dont ${j.pasHorsSport ?: 0} hors sport",
                 style = MaterialTheme.typography.bodyMedium,
             )
             val decomposition = pesee?.let { texteEcartPesee(it) }

@@ -58,7 +58,7 @@ class TableAnalyseTest {
     fun colonnesObjectif() {
         val vendredi = d0.plusDays(1) // le 29/10/2026 est un jeudi
         val jours = listOf(
-            JourLabo(d0, poids = 88.0, heurePesee = 7, nbSeances = 2),
+            JourLabo(d0, poids = 88.0, heurePesee = 7, nbSeances = 2, pasTotal = 9000, pasHorsSport = 6500),
             JourLabo(
                 vendredi,
                 poids = 87.8,
@@ -87,6 +87,9 @@ class TableAnalyseTest {
         assertEquals("NA", cellule(1, "plan_bieres"))
         assertEquals("2", cellule(1, "nb_seances"))
         assertEquals("NA", cellule(2, "nb_seances"))
+        assertEquals("9000", cellule(1, "pas_total"))
+        assertEquals("6500", cellule(1, "pas_hors_sport"))
+        assertEquals("NA", cellule(2, "pas_hors_sport"))
         // Sans objectif, les colonnes existent mais restent à NA.
         val sans = TableAnalyse.csv(jours, vendredi, listOf("alcool")).trim().lines()
         assertEquals("NA", sans[2].split(",")[entete.indexOf("levier_semaine")])

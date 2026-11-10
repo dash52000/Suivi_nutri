@@ -23,6 +23,9 @@ data class JourLabo(
     val minutesSeances: Long? = null,
     /** Nombre de séances du jour ; null si Health Connect n'a rien lu. */
     val nbSeances: Int? = null,
+    /** Pas de la montre, et sans ceux des séances (v1.10) ; null sans autorisation ou sans donnée. */
+    val pasTotal: Long? = null,
+    val pasHorsSport: Long? = null,
     /** Composition de la balance (bio-impédance) : taux de graisse en %, masses en kg. */
     val graissePct: Double? = null,
     val masseMaigreHcKg: Double? = null,

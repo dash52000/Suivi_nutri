@@ -11,11 +11,16 @@ import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import io.github.dash52000.suivinutri.labo.DiagnosticPas
+import io.github.dash52000.suivinutri.labo.Pas
+import io.github.dash52000.suivinutri.labo.Plage
+import io.github.dash52000.suivinutri.labo.TranchePas
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -48,6 +53,9 @@ data class Journee(
     val masseMaigreKg: Double? = null,
     val eauKg: Double? = null,
     val osKg: Double? = null,
+    /** Pas de la montre (Garmin), et les mêmes sans ceux faits pendant les séances (v1.10). */
+    val pasTotal: Long? = null,
+    val pasHorsSport: Long? = null,
 )
 
 /**
@@ -88,6 +96,9 @@ class HealthData(context: Context) {
             HealthPermission.getReadPermission(BoneMassRecord::class),
         )
 
+        /** Pas (v1.10) : facultatifs, pour les pas hors sport de l'onglet Cap. */
+        val PERMISSIONS_PAS: Set<String> = setOf(HealthPermission.getReadPermission(StepsRecord::class))
+
         fun statut(context: Context): Int = HealthConnectClient.getSdkStatus(context)
     }
 
@@ -97,7 +108,7 @@ class HealthData(context: Context) {
             HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
 
     suspend fun permissionsADemander(): Set<String> =
-        PERMISSIONS_BASE + PERMISSIONS_COMPOSITION + if (historiqueDisponible()) setOf(PERMISSION_HISTORIQUE) else emptySet()
+        PERMISSIONS_BASE + PERMISSIONS_COMPOSITION + PERMISSIONS_PAS + if (historiqueDisponible()) setOf(PERMISSION_HISTORIQUE) else emptySet()
 
     suspend fun permissionsAccordees(): Set<String> =
         client.permissionController.getGrantedPermissions()
@@ -213,7 +224,8 @@ class HealthData(context: Context) {
             .mapValues { (_, nuits) -> nuits.sumOf { dureeSommeilMin(it) } }
 
         // Séances : Garmin seulement, pour la même raison.
-        val activites = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
+        val seances = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
+        val activites = seances
             .map {
                 Activite(
                     debut = it.startTime.atZone(zone).toLocalDateTime(),
@@ -225,6 +237,16 @@ class HealthData(context: Context) {
             .groupBy { it.debut.toLocalDate() }
 
         val kcal = kcalParJour(debut, fin)
+
+        // Pas : Garmin seulement (le téléphone en compte aussi), moins ceux des séances, jour par jour.
+        val plages = seances.map { Plage(it.startTime, it.endTime) }
+        val pas = if (PERMISSIONS_PAS.first() !in accordees) emptyMap() else {
+            tranchesPas(t0, t1).first
+                .groupBy { it.debut.atZone(zone).toLocalDate() }
+                .mapValues { (_, tranches) ->
+                    tranches.sumOf { it.pas } to Pas.horsSeances(tranches, plages)
+                }
+        }
 
         return generateSequence(fin) { it.minusDays(1) }
             .takeWhile { !it.isBefore(debut) }
@@ -241,9 +263,30 @@ class HealthData(context: Context) {
                     kcalTotal = kcal[jour],
                     sommeilMin = sommeil[jour],
                     activites = activites[jour].orEmpty().sortedBy { it.debut },
+                    pasTotal = pas[jour]?.first,
+                    pasHorsSport = pas[jour]?.second,
                 )
             }
             .toList()
+    }
+
+    /** Tranches de pas de Garmin sur la période, et toutes les sources qui en écrivent. */
+    private suspend fun tranchesPas(t0: Instant, t1: Instant): Pair<List<TranchePas>, List<String>> {
+        val bruts = lireTout<StepsRecord>(t0, t1)
+        val garmin = Sources.garminSeulement(bruts) { it.metadata.dataOrigin.packageName }
+            .map { TranchePas(it.startTime, it.endTime, it.count) }
+        return garmin to bruts.map { Sources.libelle(it.metadata.dataOrigin.packageName) }.distinct()
+    }
+
+    /** Taille des tranches de pas d'un jour ; null sans l'autorisation de lire les pas. */
+    suspend fun diagnosticPas(jour: LocalDate): DiagnosticPas? {
+        if (!permissionsAccordees().containsAll(PERMISSIONS_PAS)) return null
+        val t0 = jour.debutInstant()
+        val t1 = jour.plusDays(1).debutInstant()
+        val (tranches, sources) = tranchesPas(t0, t1)
+        val plages = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
+            .map { Plage(it.startTime, it.endTime) }
+        return Pas.diagnostic(tranches, plages, sources)
     }
 
     suspend fun diagnosticCalories(jour: LocalDate): DiagnosticCalories {
