@@ -35,7 +35,6 @@ import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
-import io.github.dash52000.suivinutri.labo.EffetSemaine
 import io.github.dash52000.suivinutri.labo.Labo
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
@@ -225,21 +224,13 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         GrapheDecroissance(r.lendemain)
     }
 
-    Section(
-        "Sur plusieurs semaines",
-        "Effet sur les apports estimés, un réflexe à la fois. Corrélation, pas causalité : une semaine " +
-            "chargée peut à la fois faire sauter des réflexes et changer tes apports.",
-    ) {
-        ForestPlot(r.effetsSemaine.map { itemSemaine(it) }, "kcal/j", 0)
-    }
-
     Section("Effets croisés", "Écart de fréquence, en points de pourcentage.") {
         ForestPlot(r.croises.filter { !it.mecanisme }.map { itemCroise(it) }, "pts", 0)
     }
 
     Text(
         "En couleur : les effets qui résistent à la correction pour tests multiples (Benjamini-Hochberg, " +
-            "q < 5 %). Sur une vingtaine d'intervalles à 95 %, environ un exclurait zéro par pur hasard.",
+            "q < 5 %). Sur une quinzaine d'intervalles à 95 %, environ un exclurait zéro par pur hasard.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -266,17 +257,6 @@ private fun itemLendemain(e: EffetLendemain): ItemForest {
         "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} jours contre ${e.n0}" + verdict(e.q)
     }
     return ItemForest(e.libelle, j1, detail, net(e.q))
-}
-
-private fun itemSemaine(e: EffetSemaine): ItemForest {
-    val effet = e.effet
-    val detail = if (effet == null) {
-        "${e.nbSemaines} semaine(s) exploitable(s) sur ${Labo.MIN_SEMAINES} nécessaires."
-    } else {
-        "${signe(effet.estimation, 0, "kcal/j")} ${e.parQuoi} (${ic(effet, 0, "kcal/j")}) · ${e.nbSemaines} semaines" +
-            verdict(e.q)
-    }
-    return ItemForest(e.libelle, effet, detail, net(e.q))
 }
 
 private fun itemCroise(e: EffetCroise): ItemForest {

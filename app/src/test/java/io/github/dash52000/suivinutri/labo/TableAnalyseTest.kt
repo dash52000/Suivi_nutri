@@ -68,7 +68,7 @@ class TableAnalyseTest {
         )
         val objectif = io.github.dash52000.suivinutri.data.EtatObjectif(
             debut = d0,
-            leviers = mapOf(LocalDate.of(2026, 10, 26) to "Soir · pas de rab"),
+            leviers = mapOf(LocalDate.of(2026, 10, 25) to "Soir · pas de rab"), // dimanche de la semaine
             plans = mapOf(
                 vendredi to io.github.dash52000.suivinutri.data.PlanWeekEnd(
                     vendredi, repas = mapOf("ven_soir" to "dehors"), bieres = mapOf("ven" to 2),

@@ -8,6 +8,7 @@ import androidx.health.connect.client.records.BodyFatRecord
 import androidx.health.connect.client.records.BodyWaterMassRecord
 import androidx.health.connect.client.records.BoneMassRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.LeanBodyMassRecord
 import androidx.health.connect.client.records.Record
 import androidx.health.connect.client.records.SleepSessionRecord
@@ -20,6 +21,7 @@ import androidx.health.connect.client.request.AggregateRequest
 import androidx.health.connect.client.request.AggregateGroupByPeriodRequest
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.labo.DiagnosticPas
 import io.github.dash52000.suivinutri.labo.Pas
 import io.github.dash52000.suivinutri.labo.Plage
@@ -38,6 +40,8 @@ data class Activite(
     val type: String,
     /** Course, rando, vélo, natation : ce qui vide vraiment le glycogène sur une longue durée. */
     val endurance: Boolean = false,
+    /** Marche enregistrée sur la montre : pas une séance, ses pas comptent dans les pas hors sport (v1.11). */
+    val marche: Boolean = false,
 )
 
 /** Résumé d'une journée, tel que lu dans Health Connect. Null = pas de donnée. */
@@ -59,18 +63,6 @@ data class Journee(
     /** Pas de la montre (Garmin), et les mêmes sans ceux faits pendant les séances (v1.10). */
     val pasTotal: Long? = null,
     val pasHorsSport: Long? = null,
-)
-
-/**
- * Sert à vérifier le risque de double comptage des calories :
- * on compare le total agrégé par Health Connect à la somme naïve des enregistrements bruts.
- */
-data class DiagnosticCalories(
-    val date: LocalDate,
-    val totalAgrege: Double?,
-    val nbEnregistrements: Int,
-    val sommeNaive: Double,
-    val sources: List<String>,
 )
 
 class HealthData(context: Context) {
@@ -102,6 +94,9 @@ class HealthData(context: Context) {
         /** Pas (v1.10) : facultatifs, pour les pas hors sport de l'onglet Cap. */
         val PERMISSIONS_PAS: Set<String> = setOf(HealthPermission.getReadPermission(StepsRecord::class))
 
+        /** VFC (v1.11) : facultative, pour vérifier si Garmin l'envoie à Health Connect. */
+        val PERMISSIONS_VFC: Set<String> = setOf(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class))
+
         /** Les pas sont lus par quarts d'heure (v1.10). */
         const val QUART_HEURE_MIN = 15L
 
@@ -114,7 +109,7 @@ class HealthData(context: Context) {
             HealthConnectFeatures.FEATURE_STATUS_AVAILABLE
 
     suspend fun permissionsADemander(): Set<String> =
-        PERMISSIONS_BASE + PERMISSIONS_COMPOSITION + PERMISSIONS_PAS + if (historiqueDisponible()) setOf(PERMISSION_HISTORIQUE) else emptySet()
+        PERMISSIONS_BASE + PERMISSIONS_COMPOSITION + PERMISSIONS_PAS + PERMISSIONS_VFC + if (historiqueDisponible()) setOf(PERMISSION_HISTORIQUE) else emptySet()
 
     suspend fun permissionsAccordees(): Set<String> =
         client.permissionController.getGrantedPermissions()
@@ -182,8 +177,19 @@ class HealthData(context: Context) {
         }
     }
 
-    /** Résumé jour par jour, du plus récent au plus ancien. */
-    suspend fun journees(debut: LocalDate, fin: LocalDate): List<Journee> {
+    /**
+     * Dernière erreur de lecture des pas (v1.11), null si la dernière lecture s'est bien passée : une erreur ne
+     * bloque jamais le reste, mais elle ne doit plus passer inaperçue.
+     */
+    @Volatile
+    var erreurPas: String? = null
+        private set
+
+    /**
+     * Résumé jour par jour, du plus récent au plus ancien. [pasDepuis] : premier jour où lire les pas (null = toute
+     * la période) ; la lecture par quarts d'heure coûte une requête par semaine.
+     */
+    suspend fun journees(debut: LocalDate, fin: LocalDate, pasDepuis: LocalDate? = null): List<Journee> {
         val t0 = debut.debutInstant()
         val t1 = fin.plusDays(1).debutInstant()
 
@@ -238,22 +244,30 @@ class HealthData(context: Context) {
                     dureeMin = Duration.between(it.startTime, it.endTime).toMinutes(),
                     type = libelleActivite(it.exerciseType, it.title),
                     endurance = it.exerciseType in TYPES_ENDURANCE,
+                    marche = it.exerciseType == ExerciseSessionRecord.EXERCISE_TYPE_WALKING,
                 )
             }
             .groupBy { it.debut.toLocalDate() }
 
         val kcal = kcalParJour(debut, fin)
 
-        // Pas : Garmin seulement (le téléphone en compte aussi), moins ceux des séances, jour par jour.
-        val plages = seances.map { Plage(it.startTime, it.endTime) }
-        // Une erreur sur les pas ne doit jamais empêcher le reste de la lecture.
-        val pas = if (PERMISSIONS_PAS.first() !in accordees) emptyMap() else runCatching {
-            tranchesPas(t0, t1)
+        // Pas : Garmin seulement (le téléphone en compte aussi), moins ceux des séances, jour par jour. Les marches
+        // ne sont pas des séances : leurs pas restent dans les pas hors sport (v1.11).
+        val plages = seances.filter { it.exerciseType != ExerciseSessionRecord.EXERCISE_TYPE_WALKING }
+            .map { Plage(it.startTime, it.endTime) }
+        val debutPas = if (pasDepuis != null && pasDepuis.isAfter(debut)) pasDepuis.debutInstant() else t0
+        // Une erreur sur les pas ne doit jamais empêcher le reste de la lecture, mais elle est notée.
+        val pas = if (PERMISSIONS_PAS.first() !in accordees || !debutPas.isBefore(t1)) emptyMap() else runCatching {
+            tranchesPas(debutPas, t1)
                 .groupBy { it.debut.atZone(zone).toLocalDate() }
                 .mapValues { (_, tranches) ->
                     tranches.sumOf { it.pas } to Pas.horsSeances(tranches, plages)
                 }
-        }.getOrElse { emptyMap() }
+        }.onSuccess { erreurPas = null }.getOrElse { e ->
+            erreurPas = e.message ?: e.javaClass.simpleName
+            Usage.log(appContext, "pas_erreur", erreurPas ?: "")
+            emptyMap()
+        }
 
         return generateSequence(fin) { it.minusDays(1) }
             .takeWhile { !it.isBefore(debut) }
@@ -316,23 +330,25 @@ class HealthData(context: Context) {
             AggregateRequest(metrics = setOf(StepsRecord.COUNT_TOTAL), timeRangeFilter = TimeRangeFilter.between(t0, t1))
         ).dataOrigins.map { Sources.libelle(it.packageName) }
         val plages = Sources.garminSeulement(lireTout<ExerciseSessionRecord>(t0, t1)) { it.metadata.dataOrigin.packageName }
+            .filter { it.exerciseType != ExerciseSessionRecord.EXERCISE_TYPE_WALKING }
             .map { Plage(it.startTime, it.endTime) }
         return Pas.diagnostic(tranches, plages, sources)
     }
 
-    suspend fun diagnosticCalories(jour: LocalDate): DiagnosticCalories {
-        val bruts = lireTout<TotalCaloriesBurnedRecord>(
-            jour.debutInstant(),
-            jour.plusDays(1).debutInstant(),
+    /** VFC de la nuit reçue ces 7 derniers jours (v1.11) : nombre de mesures et applis sources. */
+    data class DiagnosticVfc(val nbMesures: Int, val nbNuits: Int, val moyenneMs: Double?, val sources: List<String>)
+
+    /** Null sans l'autorisation de lire la VFC. */
+    suspend fun diagnosticVfc(aujourdHui: LocalDate): DiagnosticVfc? = runCatching {
+        if (!permissionsAccordees().containsAll(PERMISSIONS_VFC)) return@runCatching null
+        val mesures = lireTout<HeartRateVariabilityRmssdRecord>(aujourdHui.minusDays(7).debutInstant(), aujourdHui.plusDays(1).debutInstant())
+        DiagnosticVfc(
+            nbMesures = mesures.size,
+            nbNuits = mesures.map { it.time.atZone(zone).toLocalDate() }.distinct().size,
+            moyenneMs = if (mesures.isEmpty()) null else mesures.map { it.heartRateVariabilityMillis }.average(),
+            sources = mesures.map { Sources.libelle(it.metadata.dataOrigin.packageName) }.distinct(),
         )
-        return DiagnosticCalories(
-            date = jour,
-            totalAgrege = kcalParJour(jour, jour)[jour],
-            nbEnregistrements = bruts.size,
-            sommeNaive = bruts.sumOf { it.energy.inKilocalories },
-            sources = bruts.map { it.metadata.dataOrigin.packageName }.distinct(),
-        )
-    }
+    }.getOrNull()
 }
 
 private val TYPES_ENDURANCE = setOf(

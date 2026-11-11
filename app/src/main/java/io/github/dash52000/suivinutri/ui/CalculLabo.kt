@@ -6,10 +6,13 @@ import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.data.Objectif
+import io.github.dash52000.suivinutri.labo.Cap
 import io.github.dash52000.suivinutri.labo.JourLabo
 import io.github.dash52000.suivinutri.labo.Kalman
 import io.github.dash52000.suivinutri.labo.Labo
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
+import io.github.dash52000.suivinutri.labo.Pas
 import io.github.dash52000.suivinutri.labo.ResultatLabo
 import io.github.dash52000.suivinutri.labo.collecterJours
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +39,8 @@ internal object CalculLabo {
         val jours: List<JourLabo>,
         val lissage: Kalman.Lissage?,
         val aujourdHui: LocalDate,
+        /** Lecture des pas impossible (Health Connect) : message à afficher, null si tout va bien (v1.11). */
+        val erreurPas: String? = null,
     )
 
     const val DUREE_CACHE_HEURES = 3L
@@ -74,19 +79,23 @@ internal object CalculLabo {
         Usage.log(context, origine, if (forcer) "calcul_force" else "calcul_auto")
         val nouvelleCle = cleCache(journal, config)
         val aujourdHui = LocalDate.now()
-        val jours = collecterJours(health, journal, aujourdHui)
+        // Pas : seulement la période utile (8 semaines avant le départ de l'objectif, puis jusqu'à aujourd'hui).
+        val depart = Cap.debutSemaine(Objectif(context).etat().debut)
+        val jours = collecterJours(health, journal, aujourdHui, pasDepuis = depart.minusWeeks(Pas.SEMAINES_BASE))
         val entrees = journal.toutes()
         val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
         val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
         val calcul = withContext(Dispatchers.Default) {
+            val resultat = Labo.analyser(jours, aujourdHui, perso, config.enPause())
             Calcul(
-                resultat = Labo.analyser(jours, aujourdHui, perso),
+                resultat = resultat,
                 calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),
                 dates28 = dates28,
                 calculeLe = Instant.now(),
                 jours = jours,
-                lissage = Labo.lissage(jours, aujourdHui),
+                lissage = resultat.lissage,
                 aujourdHui = aujourdHui,
+                erreurPas = health.erreurPas,
             )
         }
         dernier = calcul

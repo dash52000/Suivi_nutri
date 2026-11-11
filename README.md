@@ -22,19 +22,26 @@ Le workflow signe avec une clé fixe, fournie par deux secrets du dépôt
 La clé ne doit jamais être commitée. Sans elle, impossible de publier une mise à
 jour qui s'installe par-dessus l'appli existante.
 
-## Objectif de perte (v1.9, onglet Cap)
+## Objectif de perte (onglet Cap)
 
 Le but de l'appli est de perdre du poids : elle garde ses mesures et ajoute un cap et une boucle hebdomadaire.
-Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'instrument, c'est la tendance du poids.
+Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.md`.
 
-- **Couloir** : −0,40 à −0,25 kg/semaine. Pente d'une semaine = niveau lissé du lundi matin suivant − niveau du
-  lundi matin, IC 95 % tiré de la covariance a posteriori du lisseur (≈ ± 0,24 kg avec une pesée par jour).
-  Au-dessus du couloir : tout l'intervalle au-dessus de −0,25 ; plus vite : tout l'intervalle sous −0,40 ; dans le
-  couloir : estimation entre les deux ; sinon (ou moins de 3 pesées) : pas encore lisible. Semaine en cours :
-  pente provisoire dès 2 jours écoulés, ramenée à 7 jours.
-- **Budget bière** : 3 bouteilles de 33 cl par semaine au départ (réglable). 2 semaines finies de suite au-dessus
-  du couloir : −1 (minimum 0) ; 2 de suite dans le couloir ou plus vite : +1, sans dépasser le départ ; une semaine
-  pas lisible remet les compteurs à zéro. Bières seulement (pils à quadrupel), en équivalent 33 cl.
+- **Couloir d'effort** (v1.11) : on juge l'effort (de combien je mange moins qu'au départ, kcal/j), pas la pente.
+  Effort = ρ × variation de la tendance ÷ jours + ε × écart moyen au niveau de départ (modèle de Hall linéarisé,
+  ρ = 8 840 kcal/kg, ε = 25,8 kcal/j/kg, Sanghvi 2015), sur 2 semaines glissantes. Couloir −505 à −316 kcal/j
+  (l'ancien −0,40 à −0,25 kg/sem traduit par Hall) : la perte attendue ralentit d'elle-même, ce n'est plus compté
+  comme un relâchement. Au-dessus : P(effort > −316) ≥ 90 % ; plus vite : IC 95 % sous −505 ; dans le couloir :
+  estimation entre les deux ; sinon (ou moins de 3 pesées) pas lisible. Le graphe montre la bande de poids attendue.
+- **Semaine du dimanche** (v1.11) : comportements du dimanche au samedi, poids du dimanche matin au dimanche matin.
+  Verdicts **figés** avec les seules pesées connues à la clôture (sinon le lisseur les révisait après coup).
+- **Rodage** (v1.11) : les 2 premières semaines ne sont pas jugées. Avec des verdicts figés, la tendance met environ
+  3 semaines à suivre un changement d'effort (−86, −196, −292 puis −353 kcal/j estimés pour un vrai −400).
+- **Simulation dans le build** (`SimulationCouloirTest`) : pesées + eau + bruit réel, 26 semaines. Effort tenu à −400 :
+  au plus 20 % de propositions de baisse (≈ 10 %) ; effort à −250 : au moins 80 % ; appétit qui compense : au moins 90 %.
+- **Budget bière** : 3 bouteilles de 33 cl par semaine au départ (réglable). **Figé en v1.11** : la règle
+  (2 semaines au-dessus → −1, 2 semaines dans le couloir → +1) deviendra une proposition à valider au bilan du
+  dimanche (v1.12). Bières seulement (pils à quadrupel), en équivalent 33 cl ; « oui » sans boisson saisie = NA.
 - **Levier de la semaine** : 3 propositions, les réflexes les moins tenus des 14 derniers jours (au moins 3
   réponses), ou un autre au choix. Adhérence = soirs tenus / soirs renseignés. Pas de conclusion causale dans
   l'appli : R agrège les semaines (`levier_semaine`).
@@ -44,13 +51,17 @@ Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'in
   (rab, part normale de dessert ou ≥ 2 unités d'alcool ; au moins 3 soirs renseignés et 50 % de dérapages) ;
   vendredi par défaut, pour le plan du week-end. Désactivable.
 - **Pas hors sport** (v1.10) : pas Garmin du jour moins les pas faits pendant les séances (une tranche à
-  cheval sur une séance est coupée au prorata ; séances qui se chevauchent comptées une fois). Jours finis avec
+  cheval sur une séance est coupée au prorata ; séances qui se chevauchent comptées une fois). Depuis la v1.11, une
+  marche enregistrée sur la montre n'est pas une séance : ses pas comptent. Lecture limitée à la période utile
+  (8 semaines avant le départ), et une erreur de lecture est notée et affichée. Jours finis avec
   au moins 1 000 pas seulement. Base = médiane des 8 semaines avant le départ (à défaut, des 8 premières semaines
   de données, au moins 14 jours) ; cible = base + 2 000. Chaque semaine : moyenne et jours au-dessus de la cible ;
   levier possible « pas hors sport ≥ cible ». Pas lus par quarts d'heure agrégés par Health Connect (Garmin
   seulement) : Garmin écrit des enregistrements de durée nulle que la bibliothèque refuse en lecture brute.
   Données affiche les pas d'hier, total et hors sport. Autorisation Health Connect facultative.
-- **Activité** : chaque semaine affiche séances, minutes et dépense moyenne (jours avec montre). Flux unique
+- **Protéines** (v1.11) : whey (25 g la dose), œufs (6 g), viande ou poisson (25 g la portion de 100-120 g),
+  saisis le soir ; moyenne de la semaine en g/j et g/kg. Laitages et légumineuses non comptés.
+- **Activité** : chaque semaine affiche séances (hors marches), minutes et dépense moyenne (jours avec montre). Flux unique
   Suivi_nutri → coach running par l'export CSV ; pas de lecture du plan d'entraînement.
 
 ## Labo
@@ -94,9 +105,8 @@ Pas d'objectif en kcal (apports et dépense connus à ±350 kcal/j près) : l'in
   sur toutes les expositions du soir J à la fois : rab et dessert sur 3 niveaux (0 ; 0,5 ; 1), alcool
   en unités, beaux-parents, longue sortie (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
   les jours complets ; ≥ 15 jours complets. Erreurs-types de Newey-West (retard 2 jours, jours voisins seulement).
-- **Plusieurs semaines** : pente de régression des apports estimés sur le taux de chaque réflexe,
-  un réflexe à la fois, Newey-West (retard 1 semaine). Au moins 8 semaines.
-- **Effets croisés** : différence de proportions, intervalle d'Agresti-Caffo.
+- **Effets croisés** : différence de proportions, intervalle d'Agresti-Caffo. Ceux qui reposent sur une question
+  en pause ne sont ni affichés ni comptés dans la correction (v1.11).
   Nuit courte et alcool la veille → rab / dessert ; tupp remplis la veille → tupp mangé le midi ;
   séance le midi → petit creux ; petit creux → rab le soir.
 - **Tests multiples** : correction de Benjamini-Hochberg sur l'ensemble des effets ; un effet n'est
@@ -114,7 +124,9 @@ eau, os) et leurs tendances, toutes les réponses, nombre de boissons et unités
 dépense retenue (`kcal_retenue`, NA les jours sans montre), tendance et écart de l'eau, poids et masse
 grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` reste pesée brute − tendance).
 Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_bieres`, `bieres_eq33`,
-`plan_bieres`, `plan_repas_dehors`, `nb_seances` ; depuis la v1.10 : `pas_total`, `pas_hors_sport` (Garmin).
+`plan_bieres`, `plan_repas_dehors`, `nb_seances` ; depuis la v1.10 : `pas_total`, `pas_hors_sport` (Garmin) ; depuis la v1.11 : `proteines_g`. Depuis la v1.11,
+`levier_semaine` et `budget_bieres` suivent la semaine du dimanche, et `unites_alcool` vaut NA pour « oui » sans
+boisson saisie.
 
 ## Feuille de route
 
@@ -145,5 +157,14 @@ Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_b
   budget bière ajusté par la pente, signal de la semaine, colonnes de l'objectif dans l'export
 - **v1.10** : pas hors sport (lecture des pas, soustraction des séances, base et cible, levier, diagnostic
   des tranches, colonnes `pas_total` et `pas_hors_sport`)
+- **v1.11** : revue du 11/11/2026 — couloir d'effort (modèle de Hall), semaine du dimanche, verdicts figés,
+  rodage de 2 semaines, budget figé ; marches hors séances, lecture des pas limitée et erreurs signalées, alcool
+  « oui » sans boisson = NA ; protéines en portions ; carte de vérification de la VFC ; ménage (bloc « plusieurs
+  semaines », croisés sur questions en pause, cafés et énergie en pause, test du double comptage, tendance
+  calculée une seule fois) ; simulation du couloir dans les tests du build
+- **v1.12** (prévue) : bilan du dimanche (dimanche 19 h, dans le Cap) : effort et bande de Hall, balance de la
+  semaine, graisse et maigre sur 4 semaines, protection du muscle, effort déclaré et face-à-face mensuel,
+  propositions de levier et de budget à valider ; mécanismes en probabilités bayésiennes à lieu de dîner égal,
+  levier comparé aux leviers non choisis
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

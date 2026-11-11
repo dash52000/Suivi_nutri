@@ -61,9 +61,9 @@ object Signal {
         val jour = Cap.momentQuiDerape(Journal(context).toutes(), aujourdHui).jour
         var date = aujourdHui.with(TemporalAdjusters.nextOrSame(jour))
         var cible = date.atTime(HEURE, 0).atZone(maintenant.zone)
-        if (!cible.isAfter(maintenant) || objectif.derniereSemaineSignal() == Cap.lundiDe(date)) {
+        if (!cible.isAfter(maintenant) || objectif.derniereSemaineSignal() == Cap.debutSemaine(date)) {
             date = aujourdHui.with(TemporalAdjusters.next(jour))
-            if (objectif.derniereSemaineSignal() == Cap.lundiDe(date)) date = date.plusWeeks(1)
+            if (objectif.derniereSemaineSignal() == Cap.debutSemaine(date)) date = date.plusWeeks(1)
             cible = date.atTime(HEURE, 0).atZone(maintenant.zone)
         }
         alarmes.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cible.toInstant().toEpochMilli(), intention)
@@ -78,8 +78,8 @@ object Signal {
         val etat = objectif.etat()
         if (!etat.signalActif) return
         val aujourdHui = LocalDate.now()
-        val lundi = Cap.lundiDe(aujourdHui)
-        if (objectif.derniereSemaineSignal() == lundi) {
+        val semaine = Cap.debutSemaine(aujourdHui)
+        if (objectif.derniereSemaineSignal() == semaine) {
             Usage.log(context, "signal_non_envoye", "deja_envoye_cette_semaine")
             return
         }
@@ -89,10 +89,10 @@ object Signal {
         }
         val entrees = Journal(context).toutes()
         val moment = Cap.momentQuiDerape(entrees, aujourdHui)
-        val bieres = (0L..6L).map { lundi.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
+        val bieres = (0L..6L).map { semaine.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
             .mapNotNull { Cap.bieresEq33(entrees[it]) }.sum()
         val budget = objectif.budgetCourant()
-        val levier = etat.leviers[lundi]
+        val levier = etat.leviers[semaine]
 
         val titre = nomJour(aujourdHui.dayOfWeek).replaceFirstChar { it.uppercase() } + " soir"
         val texte = buildString {
@@ -127,7 +127,7 @@ object Signal {
             .build()
         try {
             NotificationManagerCompat.from(context).notify(ID_NOTIF, notif)
-            objectif.noterSignal(lundi)
+            objectif.noterSignal(semaine)
             Usage.log(
                 context, "signal_envoye",
                 "jour=${aujourdHui.dayOfWeek};par_defaut=${moment.parDefaut};derapages=${moment.derapages}/${moment.soirs}",

@@ -1,6 +1,6 @@
 package io.github.dash52000.suivinutri.data
 
-import io.github.dash52000.suivinutri.labo.JourLabo
+import io.github.dash52000.suivinutri.labo.Cap
 import io.github.dash52000.suivinutri.labo.Labo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -42,14 +42,23 @@ class QuestionPersoTest {
     }
 
     @Test
+    fun pauseParDefautV111() {
+        // v1.11 : cafés et énergie ne servent à aucun calcul, en pause ; ce sont bien des questions existantes.
+        assertEquals(setOf("cafes", "energie"), Configuration.PAUSE_V111)
+        assertTrue(Configuration.PAUSE_V111.all { id -> Questionnaire.questions.any { it.id == id } })
+    }
+
+    /** Les questions perso entrent dans le calendrier des réflexes et dans les leviers proposés (v1.11). */
+    @Test
     fun leLaboAnalyseLesQuestionsPerso() {
         val q = QuestionPerso("perso_grignote", "Grignoté après le dîner ?", TypePerso.OUI_NON, "non", Condition.TOUJOURS)
         val debut = LocalDate.of(2026, 9, 1)
-        val jours = (0L until 14L).map { k ->
-            JourLabo(debut.plusDays(k), entree = EntreeJour(debut.plusDays(k), mapOf(q.id to "non")))
+        val entrees = (0L until 14L).associate { k ->
+            debut.plusDays(k) to EntreeJour(debut.plusDays(k), mapOf(q.id to "oui"))
         }
         val perso = listOf(q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) })
-        val r = Labo.analyser(jours, debut.plusDays(14), perso)
-        assertTrue(r.effetsSemaine.any { it.libelle == q.libelle })
+        val calendrier = Labo.calendrier(entrees, entrees.keys.sorted(), Labo.reflexes + perso)
+        assertTrue(calendrier.any { it.libelle == q.libelle && it.repondus == 14 })
+        assertTrue(q.libelle in Cap.propositions(entrees, debut.plusDays(13), Labo.reflexes + perso))
     }
 }

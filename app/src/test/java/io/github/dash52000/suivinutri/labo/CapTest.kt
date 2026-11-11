@@ -13,34 +13,51 @@ import org.junit.Test
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-/** Objectif de perte (v1.9). Pentes de référence : lisseur réécrit en numpy (voir KalmanTest). */
+/** Objectif de perte : couloir d'effort (v1.11), bières, levier, plan du week-end. */
 class CapTest {
 
-    private val bas = EtatObjectif.COULOIR_BAS
-    private val haut = EtatObjectif.COULOIR_HAUT
+    private val bas = Hall.effortPourPente(EtatObjectif.COULOIR_BAS)
+    private val haut = Hall.effortPourPente(EtatObjectif.COULOIR_HAUT)
 
     @Test
-    fun verdictSelonLIntervalle() {
-        assertEquals(Verdict.DANS_LE_COULOIR, Cap.verdict(Intervalle(-0.30, -0.55, -0.05), 5, bas, haut))
-        assertEquals(Verdict.AU_DESSUS, Cap.verdict(Intervalle(0.10, -0.20, 0.40), 5, bas, haut))
-        assertEquals(Verdict.PLUS_VITE, Cap.verdict(Intervalle(-0.80, -1.00, -0.50), 5, bas, haut))
-        // Estimation hors couloir mais intervalle qui le touche : on ne tranche pas.
-        assertEquals(Verdict.PAS_LISIBLE, Cap.verdict(Intervalle(-0.10, -0.35, 0.15), 5, bas, haut))
-        assertEquals(Verdict.PAS_LISIBLE, Cap.verdict(Intervalle(-0.30, -0.35, -0.25), 2, bas, haut))
+    fun modeleDeHall() {
+        // Référence : (ΔApports / ε) × (1 − exp(−ε t / ρ)), ρ = 8 840, ε = 25,8 (Sanghvi 2015).
+        assertEquals(-2.71215, Hall.variation(-300.0, 91.0), 1e-4)
+        assertEquals(0.0, Hall.variation(-300.0, 0.0), 1e-12)
+        assertEquals(-315.71, Hall.effortPourPente(-0.25), 0.01)
+        assertEquals(-505.14, Hall.effortPourPente(-0.40), 0.01)
+    }
+
+    @Test
+    fun semaineDuDimanche() {
+        assertEquals(LocalDate.of(2026, 11, 8), Cap.debutSemaine(LocalDate.of(2026, 11, 11))) // mercredi
+        assertEquals(LocalDate.of(2026, 11, 8), Cap.debutSemaine(LocalDate.of(2026, 11, 8))) // dimanche
+        assertEquals(LocalDate.of(2026, 11, 8), Cap.debutSemaine(LocalDate.of(2026, 11, 14))) // samedi
+    }
+
+    @Test
+    fun verdictSelonLEffort() {
+        assertEquals(Verdict.DANS_LE_COULOIR, Cap.verdict(Intervalle(-400.0, -600.0, -200.0), 5, bas, haut))
+        // −100 ± 100 (écart-type) : P(effort > −316) ≈ 98 %.
+        assertEquals(Verdict.AU_DESSUS, Cap.verdict(Intervalle(-100.0, -296.0, 96.0), 5, bas, haut))
+        // −200 ± 100 : P ≈ 87 %, sous le seuil de 90 % ; estimation hors couloir : on ne tranche pas.
+        assertEquals(Verdict.PAS_LISIBLE, Cap.verdict(Intervalle(-200.0, -396.0, -4.0), 5, bas, haut))
+        assertEquals(Verdict.PLUS_VITE, Cap.verdict(Intervalle(-800.0, -900.0, -700.0), 5, bas, haut))
+        assertEquals(Verdict.PAS_LISIBLE, Cap.verdict(Intervalle(-400.0, -450.0, -350.0), 2, bas, haut))
         assertEquals(Verdict.PAS_LISIBLE, Cap.verdict(null, 7, bas, haut))
     }
 
     @Test
-    fun budgetDeuxSemainesDeSuite() {
+    fun regleDuBudget() {
         val a = Verdict.AU_DESSUS
         val d = Verdict.DANS_LE_COULOIR
         val p = Verdict.PAS_LISIBLE
         assertEquals(listOf(3, 3, 2, 2, 1, 1, 2, 2, 2, 3), Cap.budgets(listOf(a, a, a, a, d, d, p, d, d), 3))
-        // Jamais au-dessus du budget de départ, jamais sous zéro.
         assertEquals(listOf(3, 3, 3, 3, 3), Cap.budgets(listOf(d, d, Verdict.PLUS_VITE, d), 3))
         assertEquals(listOf(1, 1, 0, 0, 0), Cap.budgets(listOf(a, a, a, a), 1))
-        // Une semaine pas lisible coupe la série.
         assertEquals(listOf(3, 3, 3, 3), Cap.budgets(listOf(a, p, a), 3))
+        assertEquals(2, Cap.premiereBaisse(listOf(d, a, a, a)))
+        assertNull(Cap.premiereBaisse(listOf(a, p, a, d)))
     }
 
     @Test
@@ -51,8 +68,21 @@ class CapTest {
         val grande = EntreeJour(d, mapOf("alcool" to "oui"), listOf(Boisson("quadrupel", 75.0, 10.0)))
         assertEquals(75.0 / 33.0, Cap.bieresEq33(grande)!!, 1e-9)
         assertEquals(0.0, Cap.bieresEq33(EntreeJour(d, mapOf("alcool" to "aucun")))!!, 1e-9)
+        // « Oui » sans boisson saisie : on ne sait pas combien, ce n'est pas zéro (v1.11).
+        assertNull(Cap.bieresEq33(EntreeJour(d, mapOf("alcool" to "oui"))))
         assertNull(Cap.bieresEq33(EntreeJour(d, mapOf("tupp" to "oui"))))
         assertNull(Cap.bieresEq33(null))
+    }
+
+    @Test
+    fun proteinesEnPortions() {
+        val d = LocalDate.of(2026, 11, 13)
+        val e = EntreeJour(d, mapOf("whey" to "1", "oeufs" to "3", "viande" to "2"))
+        assertEquals(25.0 + 3 * 6.0 + 2 * 25.0, Labo.proteinesG(e)!!, 1e-9)
+        assertEquals(0.0, Labo.proteinesG(EntreeJour(d, mapOf("whey" to "0", "oeufs" to "0", "viande" to "0")))!!, 1e-9)
+        // Une des trois sans réponse : pas d'estimation.
+        assertNull(Labo.proteinesG(EntreeJour(d, mapOf("whey" to "1", "oeufs" to "3"))))
+        assertNull(Labo.proteinesG(null))
     }
 
     @Test
@@ -88,7 +118,6 @@ class CapTest {
         assertEquals(DayOfWeek.FRIDAY, defaut.jour)
         assertTrue(defaut.parDefaut)
 
-        // L'alcool compte à partir de 2 unités (une Tripel de 33 cl : 2,24 u).
         val d = auj.minusDays(1)
         assertEquals(true, Cap.derapage(EntreeJour(d, mapOf("alcool" to "oui"), listOf(Boisson("tripel", 33.0, 8.5)))))
         assertEquals(false, Cap.derapage(EntreeJour(d, mapOf("alcool" to "oui"), listOf(Boisson("pils", 25.0, 5.0)))))
@@ -127,67 +156,114 @@ class CapTest {
         assertNull(PlanWeekEnd.vendrediDe(ven.plusDays(3)))
     }
 
-    private fun lineaire(penteSemaine: Double): Pair<List<JourLabo>, LocalDate> {
-        val lundi = LocalDate.of(2026, 8, 3) // un lundi
-        val jours = (0L until 71L).map { k ->
-            JourLabo(date = lundi.plusDays(k), poids = 85.0 + penteSemaine / 7 * k, kcal = 2500.0, nbSeances = 1, minutesSeances = 45)
+    /** Poids sans bruit : 8 semaines stables à 85 kg, puis un effort constant [effort] à partir du dimanche [depart]. */
+    private fun serieHall(effort: Double, semainesApres: Int): Pair<List<JourLabo>, LocalDate> {
+        val depart = LocalDate.of(2026, 9, 6) // un dimanche
+        val avant = 56L
+        val jours = (-avant until 7L * semainesApres + 1).map { k ->
+            val t = maxOf(0L, k).toDouble()
+            JourLabo(date = depart.plusDays(k), poids = 85.0 + Hall.variation(effort, t), kcal = 2500.0, nbSeances = 1, minutesSeances = 45)
         }
-        return jours to lundi
+        return jours to depart
     }
 
-    /** −0,35 kg/semaine : chaque semaine dans le couloir (référence numpy −0,3521, IC ± 0,24), budget intact. */
+    /**
+     * Effort tenu à −400 kcal/j depuis le départ. Verdicts figés : la tendance met environ 3 semaines à suivre le
+     * changement (−86, −196, −292 puis −353 kcal/j) ; les 2 premières semaines sont en rodage, aucune n'est jugée
+     * « au-dessus », puis toutes sont dans le couloir et l'effort est retrouvé à quelques kcal/j près.
+     */
     @Test
-    fun perteReguliereDansLeCouloir() {
-        val (jours, lundi) = lineaire(-0.35)
-        val auj = lundi.plusDays(70)
-        val r = Cap.analyser(jours, Labo.lissage(jours, auj), EtatObjectif(debut = lundi.plusDays(30)), auj, Labo.reflexes)
-        assertEquals(lundi.plusDays(28), r.lundiDepart)
-        assertEquals(7, r.semaines.size)
-        r.semainesFinies.forEach { s ->
-            assertEquals(Verdict.DANS_LE_COULOIR, s.verdict)
-            assertEquals(-0.35, s.pente!!.estimation, 0.01)
-            assertEquals(8, s.nbPesees)
+    fun effortTenuDansLeCouloir() {
+        val (jours, depart) = serieHall(-400.0, 8)
+        val auj = depart.plusWeeks(8).plusDays(3) // mercredi de la 9e semaine
+        val r = Cap.analyser(jours, Labo.lissage(jours, auj), EtatObjectif(debut = depart.plusDays(2)), auj, Labo.reflexes)
+        assertEquals(depart, r.semaineDepart)
+        assertEquals(-505.14, r.effortBas, 0.01)
+        assertEquals(-315.71, r.effortHaut, 0.01)
+        assertEquals(9, r.semaines.size)
+        r.semainesFinies.forEachIndexed { i, s ->
+            assertEquals(DayOfWeek.SUNDAY, s.debut.dayOfWeek)
+            when {
+                i < 2 -> assertTrue(s.verdict == Verdict.RODAGE || s.verdict == Verdict.PAS_LISIBLE)
+                i == 2 -> assertTrue(s.verdict != Verdict.AU_DESSUS)
+                else -> assertEquals(Verdict.DANS_LE_COULOIR, s.verdict)
+            }
+            if (i >= 5) assertEquals(-400.0, s.effort!!.estimation, 15.0)
             assertEquals(3, s.budget)
             assertEquals(7, s.nbSeances)
-            assertEquals(2500.0, s.depenseMoyenne!!, 1e-9)
         }
-        assertEquals(-0.3521, r.semainesFinies.first().pente!!.estimation, 1e-3)
-        assertEquals(0.1231 * Stats.Z975, r.semainesFinies.first().pente!!.haut - r.semainesFinies.first().pente!!.estimation, 2e-3)
+        // Première semaine : fenêtre de 7 jours (rien avant le départ), ensuite 14.
+        assertEquals(7, r.semainesFinies.first().mesure!!.jours)
+        assertEquals(14, r.semainesFinies.last().mesure!!.jours)
+        // Semaine en cours, 3 jours écoulés : pas encore d'effort provisoire.
         assertTrue(r.semaineEnCours.enCours)
-        assertNull(r.semaineEnCours.pente)
+        assertNull(r.semaineEnCours.mesure)
         assertEquals(Verdict.PAS_LISIBLE, r.semaineEnCours.verdict)
+        assertEquals(-400.0, r.effortDepuisDebut!!.estimation, 30.0)
         assertEquals(3, r.budgetCourant)
-        assertNotNull(r.penteDepuisDebut)
-        assertEquals(-0.3514, r.penteDepuisDebut!!.estimation, 1e-3)
     }
 
-    /** +0,35 kg/semaine : au-dessus du couloir toutes les semaines, une bière de moins toutes les 2 semaines. */
+    /** Le verdict d'une semaine finie ne bouge plus quand de nouvelles pesées arrivent. */
     @Test
-    fun priseDePoidsBaisseLeBudget() {
-        val (jours, lundi) = lineaire(0.35)
-        val auj = lundi.plusDays(70)
-        val r = Cap.analyser(jours, Labo.lissage(jours, auj), EtatObjectif(debut = lundi.plusDays(28)), auj, Labo.reflexes)
-        assertTrue(r.semainesFinies.all { it.verdict == Verdict.AU_DESSUS })
-        assertEquals(listOf(3, 3, 2, 2, 1, 1), r.semainesFinies.map { it.budget })
-        assertEquals(0, r.budgetCourant)
+    fun verdictsFiges() {
+        val (jours, depart) = serieHall(-250.0, 10)
+        val etat = EtatObjectif(debut = depart)
+        val t1 = depart.plusWeeks(6)
+        val t2 = depart.plusWeeks(10)
+        val avant = jours.filter { !it.date.isAfter(t1) }
+        val r1 = Cap.analyser(avant, Labo.lissage(avant, t1), etat, t1, Labo.reflexes)
+        val r2 = Cap.analyser(jours, Labo.lissage(jours, t2), etat, t2, Labo.reflexes)
+        r1.semainesFinies.forEach { s1 ->
+            val s2 = r2.semaines.first { it.debut == s1.debut }
+            assertEquals(s1.effort!!.estimation, s2.effort!!.estimation, 1e-9)
+            assertEquals(s1.verdict, s2.verdict)
+        }
     }
 
-    /** Sans tendance du poids (pas de Health Connect), bières et levier restent calculés. */
+    /** Prise de poids : au-dessus du couloir, la règle proposerait une baisse, mais le budget reste figé en v1.11. */
+    @Test
+    fun priseDePoidsBudgetFige() {
+        val (jours, depart) = serieHall(200.0, 6)
+        val auj = depart.plusWeeks(6)
+        val r = Cap.analyser(jours, Labo.lissage(jours, auj), EtatObjectif(debut = depart), auj, Labo.reflexes)
+        assertEquals(listOf(Verdict.RODAGE, Verdict.RODAGE), r.semainesFinies.take(2).map { it.verdict })
+        assertTrue(r.semainesFinies.drop(2).all { it.verdict == Verdict.AU_DESSUS })
+        assertEquals(3, Cap.premiereBaisse(r.semainesFinies.map { it.verdict }))
+        assertTrue(r.semaines.all { it.budget == 3 })
+        assertEquals(3, r.budgetCourant)
+    }
+
+    /** Sans tendance du poids (pas de Health Connect), bières, protéines et levier restent calculés. */
     @Test
     fun sansPoidsLeResteFonctionne() {
         val auj = LocalDate.of(2026, 11, 12) // jeudi
-        val lundi = Cap.lundiDe(auj)
-        val jours = (0L..3L).map { k ->
-            val d = lundi.plusDays(k)
-            JourLabo(d, entree = EntreeJour(d, mapOf("resservi" to if (k % 2 == 0L) "non" else "oui", "alcool" to "oui"), listOf(Boisson("blonde", 33.0, 6.5))))
+        val dimanche = Cap.debutSemaine(auj)
+        val jours = (0L..4L).map { k ->
+            val d = dimanche.plusDays(k)
+            JourLabo(
+                d,
+                entree = EntreeJour(
+                    d,
+                    mapOf(
+                        "resservi" to if (k % 2 == 0L) "non" else "oui", "alcool" to "oui",
+                        "whey" to "1", "oeufs" to "2", "viande" to "1",
+                    ),
+                    listOf(Boisson("blonde", 33.0, 6.5)),
+                ),
+            )
         }
-        val etat = EtatObjectif(debut = lundi, leviers = mapOf(lundi to "Soir · pas de rab"))
+        val etat = EtatObjectif(debut = dimanche, leviers = mapOf(dimanche to "Soir · pas de rab"))
         val r = Cap.analyser(jours, null, etat, auj, Labo.reflexes)
         val s = r.semaineEnCours
+        assertEquals(dimanche, s.debut)
         assertEquals(Verdict.PAS_LISIBLE, s.verdict)
-        assertEquals(4.0, s.bieres!!, 1e-9)
-        assertEquals(4, s.joursAlcool)
-        assertEquals(Adherence(2.0, 4), s.adherence)
+        assertNull(s.mesure)
+        assertEquals(5.0, s.bieres!!, 1e-9)
+        assertEquals(5, s.joursAlcool)
+        assertEquals(Adherence(3.0, 5), s.adherence)
+        assertEquals(62.0, s.proteines!!, 1e-9)
+        assertEquals(5, s.joursProteines)
         assertEquals(3, s.budget)
+        assertNotNull(r.propositions)
     }
 }

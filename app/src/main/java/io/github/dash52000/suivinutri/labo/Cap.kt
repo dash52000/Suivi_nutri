@@ -7,30 +7,63 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
+import kotlin.math.exp
 import kotlin.math.sqrt
 
-/** Position d'une semaine par rapport au couloir de perte. */
+/**
+ * Modèle de Hall linéarisé (Sanghvi et al. 2015, AJCN) : dPoids/dt = (effort − ε × ΔPoids) / ρ, où l'effort est
+ * l'écart d'apports par rapport au départ (kcal/j, négatif = moins manger). Valeurs moyennes publiées ; l'écart
+ * d'une personne à l'autre est d'environ ±5 %.
+ */
+object Hall {
+    /** Densité énergétique effective d'une variation de poids, kcal/kg. */
+    const val RHO = 8840.0
+
+    /** Variation de la dépense par kg de poids en plus ou en moins, kcal/j par kg. */
+    const val EPS = 25.8
+
+    /** Variation de poids attendue après [jours] d'un effort constant [effort] (kcal/j). */
+    fun variation(effort: Double, jours: Double): Double = effort / EPS * (1 - exp(-EPS * jours / RHO))
+
+    /** Effort qui donne, au départ, une pente de [penteSemaine] kg par semaine. */
+    fun effortPourPente(penteSemaine: Double): Double = RHO * penteSemaine / 7
+}
+
+/** Position d'une semaine par rapport au couloir d'effort. */
 enum class Verdict(val libelle: String) {
     DANS_LE_COULOIR("dans le couloir"),
     AU_DESSUS("au-dessus du couloir"),
     PLUS_VITE("plus vite que le couloir"),
     PAS_LISIBLE("pas encore lisible"),
+
+    /** Les [Cap.SEMAINES_RODAGE] premières semaines : la tendance met environ 3 semaines à suivre un changement d'effort. */
+    RODAGE("rodage, pas encore jugé"),
 }
 
 /** Réflexe tenu sur les soirs renseignés (« à moitié » = 0,5). */
 data class Adherence(val tenus: Double, val repondus: Int)
 
-/** Une semaine vue par l'onglet Cap (lundi → dimanche ; poids du lundi matin au lundi matin suivant). */
+/** Effort et pente sur une fenêtre de jours (IC 95 %). */
+data class Mesure(val effort: Intervalle, val pente: Intervalle, val jours: Int)
+
+/**
+ * Une semaine vue par l'onglet Cap (v1.11) : du dimanche au samedi pour les comportements ; le poids se lit du
+ * dimanche matin au dimanche matin suivant.
+ */
 data class SemaineCap(
-    val lundi: LocalDate,
+    /** Dimanche qui ouvre la semaine. */
+    val debut: LocalDate,
     /** 7 pour une semaine finie, jours écoulés pour la semaine en cours. */
     val nbJours: Int,
     val enCours: Boolean,
-    /** Pente de la tendance, en kg par semaine, avec IC 95 %. */
-    val pente: Intervalle?,
+    /**
+     * Effort et pente sur les 2 semaines qui se ferment ce dimanche-là (7 jours la première semaine). Semaine finie :
+     * calculés avec les seules pesées connues à la clôture, donc figés. Semaine en cours : provisoires, dès 5 jours.
+     */
+    val mesure: Mesure?,
     val nbPesees: Int,
     val verdict: Verdict,
-    /** Budget bière en vigueur cette semaine (équivalent 33 cl). */
+    /** Budget bière de la semaine (équivalent 33 cl) : figé au budget de départ en v1.11. */
     val budget: Int,
     /** Bières bues, en équivalent 33 cl ; null si l'alcool n'a été renseigné aucun jour. */
     val bieres: Double?,
@@ -45,7 +78,13 @@ data class SemaineCap(
     val pasHorsSport: Double? = null,
     val joursPas: Int = 0,
     val joursCiblePas: Int = 0,
-)
+    /** Protéines estimées en g/j, moyenne des jours renseignés (v1.11). */
+    val proteines: Double? = null,
+    val joursProteines: Int = 0,
+) {
+    val effort: Intervalle? get() = mesure?.effort
+    val pente: Intervalle? get() = mesure?.pente
+}
 
 /** Soir de la semaine qui dérape le plus, sur les 8 dernières semaines. */
 data class MomentDerape(val jour: DayOfWeek, val derapages: Int, val soirs: Int, val parDefaut: Boolean)
@@ -65,14 +104,17 @@ data class BilanPlan(
 
 data class ResultatCap(
     val debut: LocalDate,
-    val lundiDepart: LocalDate,
-    val couloirBas: Double,
-    val couloirHaut: Double,
-    /** Tendance au lundi de départ (null si pas encore de pesée à cette date). */
+    /** Dimanche de la semaine de départ. */
+    val semaineDepart: LocalDate,
+    /** Couloir d'effort, kcal/j : [effortBas] (le plus fort) à [effortHaut] (le plus faible). */
+    val effortBas: Double,
+    val effortHaut: Double,
+    /** Tendance au départ (null si pas encore de pesée à cette date). */
     val niveauDepart: Double?,
     val niveauActuel: Double?,
-    /** Pente moyenne depuis le départ, en kg par semaine (au moins 7 jours). */
+    /** Depuis le départ (au moins 7 jours) : pente moyenne (kg/sem) et effort moyen (kcal/j). */
     val penteDepuisDebut: Intervalle?,
+    val effortDepuisDebut: Intervalle?,
     /** Dans l'ordre chronologique ; la dernière est la semaine en cours. */
     val semaines: List<SemaineCap>,
     /** Budget de la semaine en cours. */
@@ -88,8 +130,8 @@ data class ResultatCap(
 }
 
 /**
- * Objectif de perte de poids (v1.9) : couloir de pente, budget bière, levier de la semaine, plan du week-end et
- * soir qui dérape. Tout se recalcule à partir du journal, de la tendance de Kalman et de l'[EtatObjectif].
+ * Objectif de perte : couloir d'effort (v1.11), budget bière, levier de la semaine, plan du week-end et soir qui
+ * dérape. Tout se recalcule à partir du journal, de la tendance de Kalman et de l'[EtatObjectif].
  */
 object Cap {
 
@@ -97,6 +139,22 @@ object Cap {
     const val JOURS_PROPOSITIONS = 14L
     const val MIN_REPONSES_PROPOSITION = 3
     const val NB_PROPOSITIONS = 3
+
+    /** Fenêtre de lecture de l'effort : 2 semaines glissantes. */
+    const val JOURS_FENETRE = 14
+
+    /** Semaine en cours : effort provisoire affiché à partir de 5 jours écoulés (avant, ± 0,5 kg/sem de bruit). */
+    const val JOURS_PROVISOIRE = 5
+
+    /**
+     * Rodage : les 2 premières semaines ne sont pas jugées. Avec des verdicts figés, la tendance met environ
+     * 3 semaines à suivre un changement d'effort (effort estimé −100, −220 puis −310 kcal/j pour un vrai −400) ;
+     * sans rodage, 20 à 35 % de fausses propositions en simulation, 10 % avec 2 semaines.
+     */
+    const val SEMAINES_RODAGE = 2L
+
+    /** « Au-dessus du couloir » si P(effort au-dessus du haut du couloir) ≥ 90 % (choisi le 11/11/2026). */
+    const val Z90 = 1.2815515655446004
 
     /** Un soir avec au moins 2 unités d'alcool (une Tripel de 33 cl) compte comme un dérapage. */
     const val SEUIL_UNITES = 2.0
@@ -110,9 +168,10 @@ object Cap {
     /** Levier lu dans Health Connect, pas dans le questionnaire (v1.10). */
     const val LEVIER_PAS = "Journée · pas hors sport ≥ cible"
 
-    fun lundiDe(d: LocalDate): LocalDate = d.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+    /** Dimanche qui ouvre la semaine de [d] (v1.11 : la semaine se ferme à la pesée du dimanche matin). */
+    fun debutSemaine(d: LocalDate): LocalDate = d.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
 
-    // ---------- Couloir ----------
+    // ---------- Couloir d'effort ----------
 
     /**
      * Pente de la tendance entre le matin de [debut] et le matin de [debut] + [jours], ramenée à 7 jours, avec
@@ -128,18 +187,47 @@ object Cap {
         return Intervalle(delta, delta - Stats.Z975 * se, delta + Stats.Z975 * se)
     }
 
-    fun verdict(pente: Intervalle?, nbPesees: Int, bas: Double, haut: Double): Verdict = when {
-        pente == null || nbPesees < MIN_PESEES -> Verdict.PAS_LISIBLE
-        pente.bas > haut -> Verdict.AU_DESSUS
-        pente.haut < bas -> Verdict.PLUS_VITE
-        pente.estimation in bas..haut -> Verdict.DANS_LE_COULOIR
-        else -> Verdict.PAS_LISIBLE
+    /**
+     * Effort (kcal/j) entre le matin de [debut] et le matin de [debut] + [jours], par le modèle de Hall inversé :
+     * ρ × variation de la tendance ÷ jours + ε × écart moyen de la tendance au niveau de [depart]. Exact pour un
+     * effort constant sur la fenêtre. L'IC ne retient que l'incertitude de la variation (le second terme pèse
+     * quelques kcal/j).
+     */
+    fun mesure(lis: Kalman.Lissage, depart: LocalDate, debut: LocalDate, jours: Int): Mesure? {
+        val p = pente(lis, debut, jours) ?: return null
+        val i0 = lis.index(depart) ?: return null
+        val i = lis.index(debut) ?: return null
+        val ecartMoyen = (0..jours).map { lis.niveau(i + it) - lis.niveau(i0) }.average()
+        val k = Hall.RHO / 7
+        val effort = Intervalle(
+            k * p.estimation + Hall.EPS * ecartMoyen,
+            k * p.bas + Hall.EPS * ecartMoyen,
+            k * p.haut + Hall.EPS * ecartMoyen,
+        )
+        return Mesure(effort, p, jours)
     }
 
     /**
-     * Budget en vigueur pour chaque semaine : élément 0 = première semaine, puis un élément de plus par semaine
-     * finie. 2 semaines de suite au-dessus du couloir : −1 (minimum 0) ; 2 semaines de suite dans le couloir ou
-     * plus vite : +1, sans dépasser [initial] ; une semaine pas lisible remet les deux compteurs à zéro.
+     * [bas] : effort le plus fort du couloir (−505 kcal/j), [haut] : le plus faible (−316 kcal/j).
+     * Au-dessus : P(effort > haut) ≥ 90 %. Plus vite : IC 95 % entièrement sous [bas]. Dans le couloir : estimation
+     * entre les deux. Sinon, ou avec moins de [MIN_PESEES] pesées dans la semaine : pas lisible.
+     */
+    fun verdict(effort: Intervalle?, nbPesees: Int, bas: Double, haut: Double): Verdict {
+        if (effort == null || nbPesees < MIN_PESEES) return Verdict.PAS_LISIBLE
+        val se = (effort.haut - effort.estimation) / Stats.Z975
+        return when {
+            effort.estimation - Z90 * se > haut -> Verdict.AU_DESSUS
+            effort.haut < bas -> Verdict.PLUS_VITE
+            effort.estimation in bas..haut -> Verdict.DANS_LE_COULOIR
+            else -> Verdict.PAS_LISIBLE
+        }
+    }
+
+    /**
+     * Ce que donnerait la règle du budget, semaine après semaine : élément 0 = première semaine, puis un élément de
+     * plus par semaine finie. 2 semaines de suite au-dessus du couloir : −1 (minimum 0) ; 2 semaines de suite dans
+     * le couloir ou plus vite : +1, sans dépasser [initial] ; une semaine pas lisible remet les compteurs à zéro.
+     * En v1.11, le budget reste figé ; cette règle servira aux propositions du bilan du dimanche (v1.12).
      */
     fun budgets(verdicts: List<Verdict>, initial: Int): List<Int> {
         val resultat = mutableListOf(initial)
@@ -150,7 +238,7 @@ object Cap {
             when (v) {
                 Verdict.AU_DESSUS -> { dessus++; dedans = 0 }
                 Verdict.DANS_LE_COULOIR, Verdict.PLUS_VITE -> { dedans++; dessus = 0 }
-                Verdict.PAS_LISIBLE -> { dessus = 0; dedans = 0 }
+                Verdict.PAS_LISIBLE, Verdict.RODAGE -> { dessus = 0; dedans = 0 }
             }
             if (dessus == 2) { budget = maxOf(0, budget - 1); dessus = 0 }
             if (dedans == 2) { budget = minOf(initial, budget + 1); dedans = 0 }
@@ -159,14 +247,28 @@ object Cap {
         return resultat
     }
 
-    // ---------- Bières ----------
+    /** Première semaine (indice dans [verdicts]) où la règle proposerait une bière de moins, null sinon. */
+    fun premiereBaisse(verdicts: List<Verdict>): Int? {
+        var dessus = 0
+        verdicts.forEachIndexed { k, v ->
+            dessus = if (v == Verdict.AU_DESSUS) dessus + 1 else 0
+            if (dessus == 2) return k
+        }
+        return null
+    }
 
-    /** Bières du jour en équivalent bouteille de 33 cl ; null si l'alcool n'a pas été renseigné. */
+    // ---------- Bières et protéines ----------
+
+    /**
+     * Bières du jour en équivalent bouteille de 33 cl ; null si l'alcool n'a pas été renseigné, ou si la réponse est
+     * « oui » sans boisson saisie (v1.11 : on ne sait pas quoi, ce n'est pas zéro).
+     */
     fun bieresEq33(e: EntreeJour?): Double? {
         if (e == null) return null
         return when (e.reponses["alcool"]) {
             "aucun" -> 0.0
-            "oui" -> e.boissons.filter { it.style in STYLES_BIERE }.sumOf { it.cl } / CL_BOUTEILLE
+            "oui" -> if (e.boissons.isEmpty()) null
+            else e.boissons.filter { it.style in STYLES_BIERE }.sumOf { it.cl } / CL_BOUTEILLE
             else -> null
         }
     }
@@ -212,12 +314,12 @@ object Cap {
     }
 
     /**
-     * Médiane des pas hors sport sur les 8 semaines avant [lundiDepart] ; à défaut (moins de 14 jours), sur les
+     * Médiane des pas hors sport sur les 8 semaines avant [depart] ; à défaut (moins de 14 jours), sur les
      * 8 premières semaines de données. Null avec moins de 14 jours en tout.
      */
-    fun basePas(jours: List<JourLabo>, lundiDepart: LocalDate, aujourdHui: LocalDate): Double? {
+    fun basePas(jours: List<JourLabo>, depart: LocalDate, aujourdHui: LocalDate): Double? {
         val retenus = jours.sortedBy { it.date }.mapNotNull { j -> pasRetenus(j, aujourdHui)?.let { j.date to it.toDouble() } }
-        val avant = retenus.filter { (d, _) -> d.isBefore(lundiDepart) && !d.isBefore(lundiDepart.minusWeeks(Pas.SEMAINES_BASE)) }
+        val avant = retenus.filter { (d, _) -> d.isBefore(depart) && !d.isBefore(depart.minusWeeks(Pas.SEMAINES_BASE)) }
         if (avant.size >= Pas.MIN_JOURS_BASE) return Pas.mediane(avant.map { it.second })
         val premier = retenus.firstOrNull()?.first ?: return null
         val debut = retenus.filter { (d, _) -> d.isBefore(premier.plusWeeks(Pas.SEMAINES_BASE)) }
@@ -301,9 +403,14 @@ object Cap {
 
     // ---------- Analyse complète ----------
 
+    /** Tendance calculée avec les seules données connues au matin de [d] : sert à figer les verdicts. */
+    fun lissageAu(jours: List<JourLabo>, d: LocalDate): Kalman.Lissage? =
+        Labo.lissage(jours.filter { !it.date.isAfter(d) }, d)
+
     /**
-     * [lis] : tendance du poids (corrigée de l'eau), null sans pesée ou sans Health Connect : les semaines sont
-     * alors « pas lisibles » mais bières, levier et activité restent calculés.
+     * [lis] : tendance du poids (corrigée de l'eau) avec toutes les données, null sans pesée ou sans Health
+     * Connect : les semaines sont alors « pas lisibles » mais bières, levier et activité restent calculés.
+     * [figee] : tendance connue à une date donnée (par défaut recalculée sur les jours jusqu'à cette date).
      */
     fun analyser(
         jours: List<JourLabo>,
@@ -311,15 +418,18 @@ object Cap {
         etat: EtatObjectif,
         aujourdHui: LocalDate,
         reflexes: List<Pair<String, (EntreeJour) -> Double?>>,
+        figee: (LocalDate) -> Kalman.Lissage? = { d -> if (lis == null) null else lissageAu(jours, d) },
     ): ResultatCap {
         val parDate = jours.associateBy { it.date }
         val entrees = jours.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap()
         val scores = reflexes.toMap()
-        val lundiCourant = lundiDe(aujourdHui)
-        val lundiDepart = minOf(lundiDe(etat.debut), lundiCourant)
+        val semaineCourante = debutSemaine(aujourdHui)
+        val semaineDepart = minOf(debutSemaine(etat.debut), semaineCourante)
+        val bas = Hall.effortPourPente(etat.couloirBas)
+        val haut = Hall.effortPourPente(etat.couloirHaut)
 
-        fun peseesRetenues(debut: LocalDate, nb: Int): Int {
-            val l = lis ?: return 0
+        fun pesees(l: Kalman.Lissage?, debut: LocalDate, nb: Int): Int {
+            if (l == null) return 0
             return (0..nb).count { k ->
                 val d = debut.plusDays(k.toLong())
                 val i = l.index(d)
@@ -327,39 +437,39 @@ object Cap {
             }
         }
 
-        class Brute(val lundi: LocalDate, val nbJours: Int, val enCours: Boolean, val pente: Intervalle?, val pesees: Int, val verdict: Verdict)
-
-        val brutes = mutableListOf<Brute>()
-        var lundi = lundiDepart
-        while (!lundi.isAfter(lundiCourant)) {
-            val enCours = lundi == lundiCourant
-            val nb = if (enCours) ChronoUnit.DAYS.between(lundi, aujourdHui).toInt() else 7
-            val p = if (lis != null && nb >= 2) pente(lis, lundi, nb) else null
-            val pesees = peseesRetenues(lundi, nb)
-            brutes += Brute(lundi, nb, enCours, p, pesees, verdict(p, pesees, etat.couloirBas, etat.couloirHaut))
-            lundi = lundi.plusWeeks(1)
-        }
-
-        val budgets = budgets(brutes.filter { !it.enCours }.map { it.verdict }, etat.budgetInitial)
-        val base = basePas(jours, lundiDepart, aujourdHui)
+        val base = basePas(jours, semaineDepart, aujourdHui)
         val cible = base?.let { it + Pas.PAS_EN_PLUS }
+        val semaines = mutableListOf<SemaineCap>()
+        var s = semaineDepart
+        while (!s.isAfter(semaineCourante)) {
+            val enCours = s == semaineCourante
+            val nb = if (enCours) ChronoUnit.DAYS.between(s, aujourdHui).toInt() else 7
+            val fin = if (enCours) aujourdHui else s.plusDays(7)
+            val l = if (enCours) lis else figee(fin)
+            val debutFenetre = maxOf(semaineDepart, fin.minusDays(JOURS_FENETRE.toLong()))
+            val joursFenetre = ChronoUnit.DAYS.between(debutFenetre, fin).toInt()
+            val m = if (l != null && (!enCours || nb >= JOURS_PROVISOIRE)) mesure(l, semaineDepart, debutFenetre, joursFenetre) else null
+            val nbPesees = pesees(l, s, nb)
 
-        val semaines = brutes.mapIndexed { idx, b ->
-            val dates = (0L..6L).map { b.lundi.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
+            val dates = (0L..6L).map { s.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
             val bieres = dates.mapNotNull { bieresEq33(entrees[it]) }
             val joursLabo = dates.mapNotNull { parDate[it] }
             val kcal = joursLabo.mapNotNull { Labo.kcalRetenue(it) }
-            val levier = etat.leviers[b.lundi]
+            val levier = etat.leviers[s]
             val pas = dates.mapNotNull { pasRetenus(parDate[it], aujourdHui) }
             val joursCible = if (cible == null) 0 else pas.count { it >= cible }
-            SemaineCap(
-                lundi = b.lundi,
-                nbJours = b.nbJours,
-                enCours = b.enCours,
-                pente = b.pente,
-                nbPesees = b.pesees,
-                verdict = b.verdict,
-                budget = budgets[minOf(idx, budgets.size - 1)],
+            val proteines = dates.mapNotNull { Labo.proteinesG(entrees[it]) }
+            semaines += SemaineCap(
+                debut = s,
+                nbJours = nb,
+                enCours = enCours,
+                mesure = m,
+                nbPesees = nbPesees,
+                verdict = verdict(m?.effort, nbPesees, bas, haut).let { v ->
+                    // Rodage : un verdict lisible n'est pas encore jugé ; « pas lisible » reste « pas lisible ».
+                    if (ChronoUnit.WEEKS.between(semaineDepart, s) < SEMAINES_RODAGE && v != Verdict.PAS_LISIBLE) Verdict.RODAGE else v
+                },
+                budget = etat.budgetInitial,
                 bieres = if (bieres.isEmpty()) null else bieres.sum(),
                 joursAlcool = bieres.size,
                 levier = levier,
@@ -373,23 +483,27 @@ object Cap {
                 pasHorsSport = if (pas.isEmpty()) null else pas.average(),
                 joursPas = pas.size,
                 joursCiblePas = joursCible,
+                proteines = if (proteines.isEmpty()) null else proteines.average(),
+                joursProteines = proteines.size,
             )
+            s = s.plusWeeks(1)
         }
 
-        val i0 = lis?.index(lundiDepart)
+        val i0 = lis?.index(semaineDepart)
         val iN = lis?.index(aujourdHui)
-        val depuisDebut = if (lis != null && i0 != null && iN != null && iN - i0 >= 7) pente(lis, lundiDepart, iN - i0) else null
+        val depuis = if (lis != null && i0 != null && iN != null && iN - i0 >= 7) mesure(lis, semaineDepart, semaineDepart, iN - i0) else null
 
         return ResultatCap(
             debut = etat.debut,
-            lundiDepart = lundiDepart,
-            couloirBas = etat.couloirBas,
-            couloirHaut = etat.couloirHaut,
+            semaineDepart = semaineDepart,
+            effortBas = bas,
+            effortHaut = haut,
             niveauDepart = if (lis != null && i0 != null) lis.niveau(i0) else null,
             niveauActuel = if (lis != null && iN != null) lis.niveau(iN) else null,
-            penteDepuisDebut = depuisDebut,
+            penteDepuisDebut = depuis?.pente,
+            effortDepuisDebut = depuis?.effort,
             semaines = semaines,
-            budgetCourant = semaines.last().budget,
+            budgetCourant = etat.budgetInitial,
             propositions = propositions(entrees, aujourdHui, reflexes, autres = listOfNotNull(cible?.let { c ->
                 val p = (0 until JOURS_PROPOSITIONS).mapNotNull { pasRetenus(parDate[aujourdHui.minusDays(it)], aujourdHui) }
                 if (p.isEmpty()) null else Triple(LEVIER_PAS, p.count { it >= c }.toDouble() / p.size, p.size)

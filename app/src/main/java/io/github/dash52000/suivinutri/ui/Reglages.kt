@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.dash52000.suivinutri.labo.Hall
 import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Condition
 import io.github.dash52000.suivinutri.data.Configuration
@@ -436,8 +437,9 @@ private fun SectionObjectif(objectif: Objectif) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("Objectif", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Couloir de ${nombre(etat.couloirBas, 2)} à ${nombre(etat.couloirHaut, 2)} kg par semaine, depuis le " +
-                "${etat.debut.format(formatCourt)}.",
+            "Couloir d'effort de ${nombre(Hall.effortPourPente(etat.couloirBas), 0)} à " +
+                "${nombre(Hall.effortPourPente(etat.couloirHaut), 0)} kcal/j (au départ, ${nombre(etat.couloirBas, 2)} à " +
+                "${nombre(etat.couloirHaut, 2)} kg par semaine), depuis le ${etat.debut.format(formatCourt)}.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -456,8 +458,9 @@ private fun SectionObjectif(objectif: Objectif) {
             }
         }
         Text(
-            "2 semaines de suite au-dessus du couloir : une bière de moins. 2 semaines de suite dans le couloir : " +
-                "une de plus, sans dépasser ce budget.",
+            "Budget figé pour l'instant : à partir du bilan du dimanche, l'appli proposera une bière de moins après " +
+                "2 semaines de suite au-dessus du couloir, une de plus après 2 semaines dans le couloir, et c'est toi " +
+                "qui valideras.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

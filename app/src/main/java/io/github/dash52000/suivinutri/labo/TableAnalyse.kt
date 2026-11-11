@@ -34,6 +34,8 @@ object TableAnalyse {
         "levier_semaine", "budget_bieres", "bieres_eq33", "plan_bieres", "plan_repas_dehors", "nb_seances",
         // v1.10 : pas de la montre, et sans ceux des séances.
         "pas_total", "pas_hors_sport",
+        // v1.11 : protéines estimées (whey, œufs, viande / poisson), en grammes.
+        "proteines_g",
     )
 
     /** Texte libre (libellé d'un levier) : entre guillemets, guillemets doublés. */
@@ -65,7 +67,7 @@ object TableAnalyse {
         val l = lis
         val c = Labo.compartiments(jours, aujourdHui, ecarts)
         val budgets = objectif?.let { o ->
-            Cap.analyser(jours, lis, o, aujourdHui, emptyList()).semaines.associate { it.lundi to it.budget }
+            Cap.analyser(jours, lis, o, aujourdHui, emptyList()).semaines.associate { it.debut to it.budget }
         } ?: emptyMap()
         val lignes = generateSequence(debut) { it.plusDays(1) }
             .takeWhile { !it.isAfter(aujourdHui) }
@@ -116,17 +118,19 @@ object TableAnalyse {
                 cellules += nombre(j?.let { Labo.graisseCorrigee(it, ecart) }, 3)
                 idsQuestions.forEach { cellules += e?.reponses?.get(it) ?: "NA" }
                 cellules += if (alcoolRepondu) e!!.boissons.size.toString() else "NA"
-                cellules += if (alcoolRepondu) nombre(e!!.unitesAlcool, 2) else "NA"
-                val lundi = Cap.lundiDe(d)
+                // « Oui » sans boisson saisie : on ne sait pas combien (v1.11).
+                cellules += if (alcoolRepondu && !(e!!.reponses["alcool"] == "oui" && e.boissons.isEmpty())) nombre(e.unitesAlcool, 2) else "NA"
+                val semaine = Cap.debutSemaine(d)
                 val plan = PlanWeekEnd.vendrediDe(d)?.let { objectif?.plans?.get(it) }
-                cellules += texte(objectif?.leviers?.get(lundi))
-                cellules += budgets[lundi]?.toString() ?: "NA"
+                cellules += texte(objectif?.leviers?.get(semaine))
+                cellules += budgets[semaine]?.toString() ?: "NA"
                 cellules += nombre(Cap.bieresEq33(e), 2)
                 cellules += plan?.bieresPrevues(d)?.toString() ?: "NA"
                 cellules += plan?.repasDehorsPrevus(d)?.toString() ?: "NA"
                 cellules += j?.nbSeances?.toString() ?: "NA"
                 cellules += j?.pasTotal?.toString() ?: "NA"
                 cellules += j?.pasHorsSport?.toString() ?: "NA"
+                cellules += nombre(Labo.proteinesG(e), 0)
                 cellules.joinToString(",")
             }
             .toList()

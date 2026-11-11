@@ -80,7 +80,8 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
     // Séances du jour, pour n'afficher que les questions utiles. En cas d'échec : on affiche tout.
     LaunchedEffect(date) {
         try {
-            val activites = health.journees(date, date).firstOrNull()?.activites.orEmpty()
+            // Les marches enregistrées sur la montre ne sont pas des séances (v1.11).
+            val activites = health.journees(date, date).firstOrNull()?.activites.orEmpty().filter { !it.marche }
             seance = activites.isNotEmpty()
             seanceMidi = activites.any { it.debut.hour in 10..14 }
         } catch (_: Exception) {

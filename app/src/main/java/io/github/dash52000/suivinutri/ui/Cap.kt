@@ -47,6 +47,7 @@ import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.BilanPlan
 import io.github.dash52000.suivinutri.labo.Cap
+import io.github.dash52000.suivinutri.labo.Hall
 import io.github.dash52000.suivinutri.labo.JourLabo
 import io.github.dash52000.suivinutri.labo.Kalman
 import io.github.dash52000.suivinutri.labo.Labo
@@ -69,6 +70,8 @@ private class DonneesCap(
     val lissage: Kalman.Lissage?,
     val poids: List<PointPoids>,
     val erreur: String?,
+    /** Lecture des pas impossible (v1.11) : affichée plutôt que de laisser disparaître le levier en silence. */
+    val erreurPas: String? = null,
 )
 
 @Composable
@@ -82,7 +85,7 @@ fun EcranCap(
     val context = LocalContext.current
     var donnees by remember {
         mutableStateOf(
-            CalculLabo.enCache(journal, config)?.let { DonneesCap(it.jours, it.lissage, it.resultat.poids, null) }
+            CalculLabo.enCache(journal, config)?.let { DonneesCap(it.jours, it.lissage, it.resultat.poids, null, it.erreurPas) }
         )
     }
     var forcer by remember { mutableIntStateOf(0) }
@@ -95,7 +98,7 @@ fun EcranCap(
         if (forcer > 0 || donnees == null) donnees = null
         donnees = try {
             val c = CalculLabo.obtenir(context, health, journal, config, forcer = forcer > 0, origine = "cap")
-            DonneesCap(c.jours, c.lissage, c.resultat.poids, null)
+            DonneesCap(c.jours, c.lissage, c.resultat.poids, null, c.erreurPas)
         } catch (e: SecurityException) {
             DonneesCap(joursSansSante(entrees), null, emptyList(), "Sans accès à Health Connect, pas de tendance du poids : autorise-le depuis l'onglet Données.")
         } catch (e: Exception) {
@@ -131,17 +134,25 @@ fun EcranCap(
         d.erreur?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
         }
+        d.erreurPas?.let {
+            Text(
+                "Pas : lecture impossible dans Health Connect ($it). Le levier « pas » est en pause jusqu'à la prochaine lecture.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
 
         CarteCap(resultat, d.poids)
 
         CarteSemaine(
             s = resultat.semaineEnCours,
             ciblePas = resultat.ciblePas,
+            poids = resultat.niveauActuel,
             propositions = resultat.propositions,
             tous = reflexes.map { it.first } + Cap.LEVIER_PAS,
             onChoisir = { libelle ->
-                objectif.choisirLevier(resultat.semaineEnCours.lundi, libelle)
-                Usage.log(context, "levier", "semaine=${resultat.semaineEnCours.lundi};levier=${libelle ?: "retire"}")
+                objectif.choisirLevier(resultat.semaineEnCours.debut, libelle)
+                Usage.log(context, "levier", "semaine=${resultat.semaineEnCours.debut};levier=${libelle ?: "retire"}")
                 etat = objectif.etat()
             },
         )
@@ -171,15 +182,19 @@ fun EcranCap(
         val finies = resultat.semainesFinies.asReversed()
         if (finies.isNotEmpty()) {
             Text("Les semaines", style = MaterialTheme.typography.titleMedium)
-            finies.forEach { CarteSemaineFinie(it, resultat.ciblePas) }
+            finies.forEach { CarteSemaineFinie(it, resultat.ciblePas, resultat.niveauActuel) }
         }
 
         Texte(
-            "Pente = variation de la tendance du poids (corrigée de l'eau) du lundi matin au lundi matin suivant, avec " +
-                "son intervalle à 95 %. Dans le couloir : estimation entre ${nombre(resultat.couloirBas, 2)} et " +
-                "${nombre(resultat.couloirHaut, 2)} kg. Au-dessus ou plus vite : tout l'intervalle est hors du couloir. " +
-                "Sinon, pas encore lisible (et moins de ${Cap.MIN_PESEES} pesées, toujours). Bières en équivalent " +
-                "bouteille de 33 cl."
+            "Effort = de combien tu manges moins qu'au départ, en kcal/j, lu sur la tendance du poids (corrigée de " +
+                "l'eau) des 2 dernières semaines par le modèle de Kevin Hall : il tient compte du ralentissement normal " +
+                "de la perte. Dans le couloir : estimation entre ${nombre(resultat.effortBas, 0)} et " +
+                "${nombre(resultat.effortHaut, 0)} kcal/j. Au-dessus : au moins 90 % de chances que l'effort soit plus " +
+                "faible que le couloir. Plus vite : tout l'intervalle à 95 % au-delà. Sinon pas encore lisible (et " +
+                "toujours avec moins de ${Cap.MIN_PESEES} pesées dans la semaine). Les ${Cap.SEMAINES_RODAGE} premières semaines ne " +
+                "sont pas jugées : la tendance met environ 3 semaines à suivre un changement d'effort. Semaine du dimanche au samedi ; le " +
+                "verdict se fige à la pesée du dimanche matin. Bières en équivalent bouteille de 33 cl ; le budget reste " +
+                "figé jusqu'aux propositions du bilan du dimanche."
         )
         OutlinedButton(onClick = { forcer++ }) { Text("Recalculer maintenant") }
         Spacer(Modifier.height(16.dp))
@@ -196,7 +211,7 @@ private fun couleurVerdict(v: Verdict): Color = when (v) {
     Verdict.DANS_LE_COULOIR -> MaterialTheme.colorScheme.primary
     Verdict.PLUS_VITE -> MaterialTheme.colorScheme.secondary
     Verdict.AU_DESSUS -> MaterialTheme.colorScheme.tertiary
-    Verdict.PAS_LISIBLE -> MaterialTheme.colorScheme.onSurfaceVariant
+    Verdict.PAS_LISIBLE, Verdict.RODAGE -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 private fun texteBieres(s: SemaineCap): String {
@@ -215,17 +230,29 @@ private fun textePas(s: SemaineCap, cible: Double?): String? {
         (cible?.let { " · ${s.joursCiblePas} jour(s) sur ${s.joursPas} au-dessus de ${nombre(it, 0)}" } ?: "")
 }
 
-private fun textePente(s: SemaineCap): String {
-    val p = s.pente ?: return if (s.enCours) "Pente : dès 2 jours écoulés" else "Pente : pas assez de pesées"
-    return "Pente : ${signe(p.estimation, 2, "kg/sem.")} (${ic(p, 2, "kg").removePrefix("IC 95 % : ")})" +
+private fun texteProteines(s: SemaineCap, poids: Double?): String? {
+    val p = s.proteines ?: return null
+    return "Protéines : ${nombre(p, 0)} g/j" + (poids?.let { " (${nombre(p / it, 1)} g/kg)" } ?: "") +
+        " sur ${s.joursProteines} jour(s) · laitages et légumineuses non comptés"
+}
+
+private fun texteEffort(s: SemaineCap): String {
+    val m = s.mesure ?: return when {
+        s.enCours -> "Effort : provisoire à partir de ${Cap.JOURS_PROVISOIRE} jours écoulés"
+        else -> "Effort : pas assez de pesées"
+    }
+    val e = m.effort
+    return "Effort : ${signe(e.estimation, 0, "kcal/j")} (${ic(e, 0, "kcal/j").removePrefix("IC 95 % : ")}) · pente " +
+        "${signe(m.pente.estimation, 2, "kg/sem.")} sur ${m.jours} jours" +
         if (s.nbPesees < Cap.MIN_PESEES) " · ${s.nbPesees} pesée(s)" else ""
 }
 
 private fun texteLevier(s: SemaineCap): String? {
     val l = s.levier ?: return null
     val a = s.adherence
+    val unite = if (l == Cap.LEVIER_PAS) "jour(s)" else "soir(s)"
     return "Levier : $l" + if (a == null) " · pas encore de réponse" else
-        " · tenu ${nombreCourt(a.tenus)} soir(s) sur ${a.repondus}"
+        " · tenu ${nombreCourt(a.tenus)} $unite sur ${a.repondus}"
 }
 
 @Composable
@@ -234,8 +261,9 @@ private fun CarteCap(r: ResultatCap, poids: List<PointPoids>) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Le cap", style = MaterialTheme.typography.titleMedium)
             Text(
-                "Couloir ${nombre(r.couloirBas, 2)} à ${nombre(r.couloirHaut, 2)} kg par semaine, depuis le lundi " +
-                    "${r.lundiDepart.format(formatCourt)}.",
+                "Couloir d'effort ${nombre(r.effortBas, 0)} à ${nombre(r.effortHaut, 0)} kcal/j, depuis le dimanche " +
+                    "${r.semaineDepart.format(formatCourt)}. La bande montre le poids attendu à cet effort : elle " +
+                    "s'aplatit avec le temps, c'est normal.",
                 style = MaterialTheme.typography.bodySmall,
             )
             GrapheCap(r, poids)
@@ -246,10 +274,12 @@ private fun CarteCap(r: ResultatCap, poids: List<PointPoids>) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
+            val e = r.effortDepuisDebut
             val p = r.penteDepuisDebut
             Text(
-                if (p == null) "Pente depuis le départ : au bout d'une semaine."
-                else "Depuis le départ : ${signe(p.estimation, 2, "kg/sem.")} (${ic(p, 2, "kg").removePrefix("IC 95 % : ")})" +
+                if (e == null || p == null) "Depuis le départ : au bout d'une semaine."
+                else "Depuis le départ : effort ${signe(e.estimation, 0, "kcal/j")} " +
+                    "(${ic(e, 0, "kcal/j").removePrefix("IC 95 % : ")}), pente ${signe(p.estimation, 2, "kg/sem.")}" +
                     (r.niveauActuel?.let { a -> r.niveauDepart?.let { d -> ", tendance ${signe(a - d, 1, "kg")}" } } ?: "") + ".",
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -257,22 +287,25 @@ private fun CarteCap(r: ResultatCap, poids: List<PointPoids>) {
     }
 }
 
-/** Tendance depuis 2 semaines avant le départ, et le couloir tracé à partir du niveau du lundi de départ. */
+/**
+ * Tendance depuis 2 semaines avant le départ, et la bande de poids attendue par le modèle de Hall pour un effort
+ * constant aux deux bords du couloir, à partir du niveau du départ.
+ */
 @Composable
 private fun GrapheCap(r: ResultatCap, poids: List<PointPoids>) {
-    val points = poids.filter { !it.date.isBefore(r.lundiDepart.minusDays(14)) }
+    val points = poids.filter { !it.date.isBefore(r.semaineDepart.minusDays(14)) }
     val depart = r.niveauDepart
     if (points.size < 2 || depart == null) {
         Texte("Le graphe apparaîtra avec quelques pesées.")
         return
     }
     val debut = points.first().date
-    val fin = maxOf(points.last().date, r.lundiDepart.plusDays(28))
-    val joursCouloir = ChronoUnit.DAYS.between(r.lundiDepart, fin).toDouble()
-    val bas = depart + r.couloirBas / 7 * joursCouloir
-    val haut = depart + r.couloirHaut / 7 * joursCouloir
+    val fin = maxOf(points.last().date, r.semaineDepart.plusDays(28))
+    val joursBande = (0..ChronoUnit.DAYS.between(r.semaineDepart, fin).toInt())
+    val bas = joursBande.map { depart + Hall.variation(r.effortBas, it.toDouble()) }
+    val haut = joursBande.map { depart + Hall.variation(r.effortHaut, it.toDouble()) }
     val valeurs = points.flatMap { listOf(it.tendance + Stats.Z975 * it.seTendance, it.tendance - Stats.Z975 * it.seTendance) } +
-        listOf(depart, bas, haut)
+        listOf(depart, bas.last(), haut.last())
     val min = valeurs.min() - 0.3
     val max = valeurs.max() + 0.3
     val etendue = maxOf(1L, ChronoUnit.DAYS.between(debut, fin)).toFloat()
@@ -293,14 +326,16 @@ private fun GrapheCap(r: ResultatCap, poids: List<PointPoids>) {
         fun y(v: Double) = (size.height * (max - v) / (max - min)).toFloat()
 
         val couloir = Path().apply {
-            moveTo(x(r.lundiDepart), y(depart))
-            lineTo(x(fin), y(haut))
-            lineTo(x(fin), y(bas))
+            joursBande.forEach { k ->
+                val px = x(r.semaineDepart.plusDays(k.toLong()))
+                if (k == 0) moveTo(px, y(haut[k])) else lineTo(px, y(haut[k]))
+            }
+            joursBande.reversed().forEach { k -> lineTo(x(r.semaineDepart.plusDays(k.toLong())), y(bas[k])) }
             close()
         }
         drawPath(couloir, couleurCouloir.copy(alpha = 0.18f))
         drawLine(
-            couleurCouloir.copy(alpha = 0.6f), Offset(x(r.lundiDepart), 0f), Offset(x(r.lundiDepart), size.height),
+            couleurCouloir.copy(alpha = 0.6f), Offset(x(r.semaineDepart), 0f), Offset(x(r.semaineDepart), size.height),
             strokeWidth = 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f)),
         )
 
@@ -330,6 +365,7 @@ private fun GrapheCap(r: ResultatCap, poids: List<PointPoids>) {
 private fun CarteSemaine(
     s: SemaineCap,
     ciblePas: Double?,
+    poids: Double?,
     propositions: List<String>,
     tous: List<String>,
     onChoisir: (String?) -> Unit,
@@ -340,7 +376,7 @@ private fun CarteSemaine(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Cette semaine", style = MaterialTheme.typography.titleMedium)
-            Texte("Du lundi ${s.lundi.format(formatCourt)} · ${s.nbJours} jour(s) écoulé(s)")
+            Texte("Du dimanche ${s.debut.format(formatCourt)} · ${s.nbJours} jour(s) écoulé(s)")
 
             if (!choix && s.levier != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -377,10 +413,11 @@ private fun CarteSemaine(
             Text(texteBieres(s), style = MaterialTheme.typography.bodyMedium)
             Text(texteActivite(s), style = MaterialTheme.typography.bodySmall)
             textePas(s, ciblePas)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            texteProteines(s, poids)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(textePente(s), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Text(texteEffort(s), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             }
-            if (s.pente != null) {
+            if (s.mesure != null) {
                 Text(
                     "Provisoire : ${s.verdict.libelle}",
                     style = MaterialTheme.typography.labelMedium,
@@ -467,18 +504,19 @@ private fun CarteBilanPlan(b: BilanPlan) {
 }
 
 @Composable
-private fun CarteSemaineFinie(s: SemaineCap, ciblePas: Double?) {
+private fun CarteSemaineFinie(s: SemaineCap, ciblePas: Double?, poids: Double?) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Semaine du ${s.lundi.format(formatCourt)}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text("Semaine du dimanche ${s.debut.format(formatCourt)}", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 Text(s.verdict.libelle, style = MaterialTheme.typography.labelLarge, color = couleurVerdict(s.verdict))
             }
-            Text(textePente(s), style = MaterialTheme.typography.bodySmall)
+            Text(texteEffort(s), style = MaterialTheme.typography.bodySmall)
             texteLevier(s)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Text(texteBieres(s), style = MaterialTheme.typography.bodySmall)
             Text(texteActivite(s), style = MaterialTheme.typography.bodySmall)
             textePas(s, ciblePas)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            texteProteines(s, poids)?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

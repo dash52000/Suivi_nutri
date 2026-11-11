@@ -63,7 +63,7 @@ class PasTest {
      */
     @Test
     fun baseCibleEtSemaine() {
-        val depart = LocalDate.of(2026, 11, 9) // un lundi
+        val depart = LocalDate.of(2026, 11, 8) // un dimanche (v1.11 : les semaines commencent le dimanche)
         val auj = depart.plusDays(3)
         val avant = (1L..56L).map { k ->
             val d = depart.minusDays(k)

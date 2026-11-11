@@ -107,15 +107,6 @@ data class EffetLendemain(
     val q: Double? = null,
 )
 
-/** Effet d'un réflexe sur les apports estimés, semaine par semaine. */
-data class EffetSemaine(
-    val libelle: String,
-    val parQuoi: String,
-    val nbSemaines: Int,
-    val effet: Intervalle?,
-    val q: Double? = null,
-)
-
 /** Une exposition (nuit courte, alcool la veille) et sa fréquence d'issue (rab, dessert). */
 data class EffetCroise(
     val exposition: String,
@@ -156,9 +147,10 @@ data class ResultatLabo(
      */
     val septDerniersJours: SemaineApports? = null,
     val lendemain: List<EffetLendemain>,
-    val effetsSemaine: List<EffetSemaine>,
     val croises: List<EffetCroise>,
     val qualite: Qualite,
+    /** Tendance du poids (corrigée de l'eau), calculée une seule fois et partagée avec le Cap (v1.11). */
+    val lissage: Kalman.Lissage? = null,
 )
 
 object Labo {
@@ -170,7 +162,6 @@ object Labo {
     const val KCAL_PAR_KG_MAIGRE = 1816.0
     const val MIN_MESURES_COMPOSITION = 3
     const val MIN_GROUPE = 5
-    const val MIN_SEMAINES = 8
     const val NUIT_COURTE_MIN = 390L
     const val LONGUE_SORTIE_MIN = 75L
 
@@ -255,8 +246,34 @@ object Labo {
     private fun unites(e: EntreeJour?): Double? {
         if (e == null) return null
         return when (e.rep("alcool")) {
-            "oui" -> e.unitesAlcool; "aucun" -> 0.0; else -> null
+            "oui" -> if (e.boissons.isEmpty()) null else e.unitesAlcool
+            "aucun" -> 0.0
+            else -> null
         }
+    }
+
+    // ---------- Protéines (v1.11) ----------
+
+    /** Protéines par portion déclarée : whey (une dose), œuf, viande ou poisson (100 à 120 g cuits). */
+    const val PROT_WHEY = 25.0
+    const val PROT_OEUF = 6.0
+    const val PROT_VIANDE = 25.0
+    const val ID_WHEY = "whey"
+    const val ID_OEUFS = "oeufs"
+    const val ID_VIANDE = "viande"
+
+    private fun nombrePortions(code: String?): Int? = code?.removeSuffix("+")?.toIntOrNull()
+
+    /**
+     * Protéines du jour estimées en grammes (whey, œufs, viande / poisson) ; null si l'une des trois questions est
+     * sans réponse. Laitages et légumineuses ne sont pas comptés : sous-estimation systématique.
+     */
+    fun proteinesG(e: EntreeJour?): Double? {
+        if (e == null) return null
+        val whey = nombrePortions(e.rep(ID_WHEY)) ?: return null
+        val oeufs = nombrePortions(e.rep(ID_OEUFS)) ?: return null
+        val viande = nombrePortions(e.rep(ID_VIANDE)) ?: return null
+        return whey * PROT_WHEY + oeufs * PROT_OEUF + viande * PROT_VIANDE
     }
 
     // ---------- Poids ----------
@@ -383,6 +400,8 @@ object Labo {
         jours: List<JourLabo>,
         aujourdHui: LocalDate,
         reflexesPerso: List<Pair<String, (EntreeJour) -> Double?>> = emptyList(),
+        /** Questions en pause : les effets croisés qui en dépendent ne sont ni calculés ni comptés (v1.11). */
+        enPause: Set<String> = emptySet(),
     ): ResultatLabo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
@@ -423,13 +442,11 @@ object Labo {
         val semaines = if (lis == null) emptyList() else semaines(parDate, lis, comp, aujourdHui)
         val septDerniersJours = if (lis == null) null else septDerniersJours(parDate, lis, comp, aujourdHui)
         val lendemain = lendemain(tries, parDate, lis)
-        val effetsSemaine = effetsSemaine(parDate, semaines.filter { !it.enCours }, reflexes + reflexesPerso)
-        val croises = croises(tries, parDate)
+        val croises = croises(tries, parDate, enPause)
 
         // Benjamini-Hochberg sur l'ensemble des effets testés : une vingtaine d'intervalles à 95 %
         // donneraient sinon environ un « effet » par pur hasard.
-        val pValeurs = lendemain.mapNotNull { it.j1?.p } + effetsSemaine.mapNotNull { it.effet?.p } +
-            croises.mapNotNull { it.ecart?.p }
+        val pValeurs = lendemain.mapNotNull { it.j1?.p } + croises.mapNotNull { it.ecart?.p }
         val q = Stats.benjaminiHochberg(pValeurs).iterator()
 
         return ResultatLabo(
@@ -438,9 +455,9 @@ object Labo {
             semaines = semaines.sortedByDescending { it.lundi },
             septDerniersJours = septDerniersJours,
             lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
-            effetsSemaine = effetsSemaine.map { e -> if (e.effet?.p != null) e.copy(q = q.next()) else e },
             croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
             qualite = qualite(tries, parDate, aujourdHui),
+            lissage = lis,
         )
     }
 
@@ -653,39 +670,6 @@ object Labo {
         }
     }
 
-    /** Réflexes agrégés par semaine, mis face aux apports estimés de la même semaine (Kalman, sans retard). */
-    private fun effetsSemaine(
-        parDate: Map<LocalDate, JourLabo>,
-        semaines: List<SemaineApports>,
-        aAnalyser: List<Pair<String, (EntreeJour) -> Double?>>,
-    ): List<EffetSemaine> {
-        fun joursDe(s: SemaineApports) = (0L..6L).mapNotNull { parDate[s.lundi.plusDays(it)] }
-        fun position(s: SemaineApports) = (s.lundi.toEpochDay() / 7).toInt()
-
-        val effets = aAnalyser.map { (libelle, score) ->
-            val points = semaines.mapNotNull { s ->
-                val scores = joursDe(s).mapNotNull { j -> j.entree?.let(score) }
-                if (scores.size >= 2) Triple(scores.average(), s.apportsEstimes, position(s)) else null
-            }
-            val effet = if (points.size >= MIN_SEMAINES) {
-                Stats.penteNeweyWest(points.map { it.first }, points.map { it.second }, points.map { it.third })
-                    ?.fois(1.0 / 7)
-            } else null
-            EffetSemaine(libelle, "par soir de plus sur 7", points.size, effet)
-        }
-
-        val pointsAlcool = semaines.mapNotNull { s ->
-            val u = joursDe(s).mapNotNull { unites(it.entree) }
-            if (u.size >= 4) Triple(u.sum() / u.size * 7, s.apportsEstimes, position(s)) else null
-        }
-        val effetAlcool = if (pointsAlcool.size >= MIN_SEMAINES) {
-            Stats.penteNeweyWest(pointsAlcool.map { it.first }, pointsAlcool.map { it.second }, pointsAlcool.map { it.third })
-                ?.fois(5.0)
-        } else null
-
-        return effets + EffetSemaine("Alcool", "par 5 unités de plus par semaine", pointsAlcool.size, effetAlcool)
-    }
-
     /** Une exposition d'un jour et l'issue mesurée le même jour. */
     private class Croisement(
         val exposition: String,
@@ -694,10 +678,12 @@ object Labo {
         val expose: (JourLabo) -> Boolean?,
         val mesure: (JourLabo) -> Boolean?,
         val mecanisme: Boolean = false,
+        /** Questions du journal dont dépend le croisement. */
+        val ids: Set<String> = emptySet(),
     )
 
     /** Ce qui se passe avant (nuit, veille, midi) change-t-il ce qui suit (midi, soir) ? */
-    private fun croises(tries: List<JourLabo>, parDate: Map<LocalDate, JourLabo>): List<EffetCroise> {
+    private fun croises(tries: List<JourLabo>, parDate: Map<LocalDate, JourLabo>, enPause: Set<String>): List<EffetCroise> {
         val nuitCourte: (JourLabo) -> Boolean? = { j -> j.sommeilMin?.let { it < NUIT_COURTE_MIN } }
         val alcoolVeille: (JourLabo) -> Boolean? = { j -> alcool(parDate[j.date.minusDays(1)]?.entree) }
         val tuppVeille: (JourLabo) -> Boolean? = { j ->
@@ -719,20 +705,20 @@ object Labo {
 
         val croisements = listOf(
             // Mécanismes : chaque réflexe fait-il, le soir même, ce pour quoi il a été conçu ?
-            Croisement("Soirs où tu as pris ton temps", "les soirs mangés vite", "rab le soir", ouiNon("temps"), rabSoir, true),
-            Croisement("Soirs avec les boîtes posées", "sans les boîtes", "rab le soir", ouiNon("boites"), rabSoir, true),
-            Croisement("Soirs où le plaisir a baissé", "quand il n'a pas baissé", "rab le soir", ouiNon("plaisir_baisse"), rabSoir, true),
-            Croisement("Jours avec collation", "sans collation", "fringale en séance", ouiNon("collation"), ouiNon("fringale"), true),
-            Croisement("Soirs sans rab", "les soirs avec rab", "faim au coucher", pasDeRab, ouiNon("faim_coucher"), true),
+            Croisement("Soirs où tu as pris ton temps", "les soirs mangés vite", "rab le soir", ouiNon("temps"), rabSoir, true, setOf("temps", "resservi")),
+            Croisement("Soirs avec les boîtes posées", "sans les boîtes", "rab le soir", ouiNon("boites"), rabSoir, true, setOf("boites", "resservi")),
+            Croisement("Soirs où le plaisir a baissé", "quand il n'a pas baissé", "rab le soir", ouiNon("plaisir_baisse"), rabSoir, true, setOf("plaisir_baisse", "resservi")),
+            Croisement("Jours avec collation", "sans collation", "fringale en séance", ouiNon("collation"), ouiNon("fringale"), true, setOf("collation", "fringale")),
+            Croisement("Soirs sans rab", "les soirs avec rab", "faim au coucher", pasDeRab, ouiNon("faim_coucher"), true, setOf("resservi", "faim_coucher")),
 
-            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir),
-            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "dessert pris", nuitCourte, dessertSoir),
-            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "rab le soir", alcoolVeille, rabSoir),
-            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "dessert pris", alcoolVeille, dessertSoir),
-            Croisement("Tupp remplis la veille", "quand ils ne l'ont pas été", "tupp mangé le midi", tuppVeille, tuppMidi),
-            Croisement("Les jours de séance le midi", "les autres jours", "petit creux l'après-midi", { j -> j.seanceMidi }, creux),
-            Croisement("Après un petit creux l'après-midi", "sans creux", "rab le soir", creux, rabSoir),
-        )
+            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir, ids = setOf("resservi")),
+            Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "dessert pris", nuitCourte, dessertSoir, ids = setOf("dessert")),
+            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "rab le soir", alcoolVeille, rabSoir, ids = setOf("alcool", "resservi")),
+            Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "dessert pris", alcoolVeille, dessertSoir, ids = setOf("alcool", "dessert")),
+            Croisement("Tupp remplis la veille", "quand ils ne l'ont pas été", "tupp mangé le midi", tuppVeille, tuppMidi, ids = setOf("tupp", "midi_quoi")),
+            Croisement("Les jours de séance le midi", "les autres jours", "petit creux l'après-midi", { j -> j.seanceMidi }, creux, ids = setOf("midi_creux")),
+            Croisement("Après un petit creux l'après-midi", "sans creux", "rab le soir", creux, rabSoir, ids = setOf("midi_creux", "resservi")),
+        ).filter { c -> c.ids.none { it in enPause } }
         return croisements.map { c ->
             var s1 = 0; var n1 = 0; var s0 = 0; var n0 = 0
             tries.forEach { j ->

@@ -8,19 +8,6 @@ import java.time.LocalDate
 import java.util.Locale
 
 /**
- * Les réponses d'une journée. Une question absente de [reponses] = pas de réponse (NA),
- * jamais un « non ».
- */
-data class EntreeJour(
-    val date: LocalDate,
-    val reponses: Map<String, String> = emptyMap(),
-    val boissons: List<Boisson> = emptyList(),
-) {
-    val vide: Boolean get() = reponses.isEmpty() && boissons.isEmpty()
-    val unitesAlcool: Double get() = boissons.sumOf { it.unites }
-}
-
-/**
  * Journal stocké dans un fichier JSON privé de l'appli.
  * Petit volume (une entrée par jour) : lu et écrit en entier, écriture atomique.
  */
@@ -78,7 +65,8 @@ class Journal(context: Context) {
             ids.forEach { cellules += e.reponses[it] ?: "NA" }
             cellules += e.reponses[Questionnaire.ID_ALCOOL] ?: "NA"
             cellules += if (e.reponses[Questionnaire.ID_ALCOOL] == null) "NA" else e.boissons.size.toString()
-            cellules += if (e.reponses[Questionnaire.ID_ALCOOL] == null) "NA"
+            cellules += if (e.reponses[Questionnaire.ID_ALCOOL] == null ||
+                (e.reponses[Questionnaire.ID_ALCOOL] == "oui" && e.boissons.isEmpty())) "NA"
             else String.format(Locale.US, "%.2f", e.unitesAlcool)
             cellules.joinToString(",")
         }

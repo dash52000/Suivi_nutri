@@ -2,6 +2,7 @@ package io.github.dash52000.suivinutri.labo
 
 import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Journal
+import io.github.dash52000.suivinutri.health.Activite
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.health.Journee
 import java.time.LocalDate
@@ -12,8 +13,10 @@ suspend fun collecterJours(
     journal: Journal,
     aujourdHui: LocalDate,
     historiqueJours: Long = 364,
+    /** Premier jour où lire les pas (v1.11 : seulement la période utile au Cap) ; null = toute la période. */
+    pasDepuis: LocalDate? = null,
 ): List<JourLabo> {
-    val sante = health.journees(aujourdHui.minusDays(historiqueJours), aujourdHui).associateBy { it.date }
+    val sante = health.journees(aujourdHui.minusDays(historiqueJours), aujourdHui, pasDepuis).associateBy { it.date }
     val entrees = journal.toutes()
     return (sante.keys + entrees.keys).map { d -> versJourLabo(d, sante[d], entrees[d]) }
 }
@@ -22,17 +25,20 @@ suspend fun collecterJours(
 fun joursSansSante(entrees: Map<LocalDate, EntreeJour>): List<JourLabo> =
     entrees.map { (d, e) -> JourLabo(d, entree = e) }
 
-fun versJourLabo(date: LocalDate, s: Journee?, e: EntreeJour?): JourLabo = JourLabo(
+/** Les marches enregistrées sur la montre ne sont pas des séances (v1.11) : elles comptent dans les pas hors sport. */
+fun versJourLabo(date: LocalDate, s: Journee?, e: EntreeJour?): JourLabo = versJourLabo(date, s, e, s?.activites?.filter { !it.marche })
+
+private fun versJourLabo(date: LocalDate, s: Journee?, e: EntreeJour?, seances: List<Activite>?): JourLabo = JourLabo(
     date = date,
     poids = s?.poidsKg,
     kcal = s?.kcalTotal,
     sommeilMin = s?.sommeilMin,
     entree = e,
-    seanceMidi = s?.activites?.any { it.debut.hour in 10..14 },
+    seanceMidi = seances?.any { it.debut.hour in 10..14 },
     heurePesee = s?.poidsHeure,
-    longueSortie = s?.activites?.any { it.endurance && it.dureeMin >= Labo.LONGUE_SORTIE_MIN },
-    minutesSeances = s?.activites?.sumOf { it.dureeMin },
-    nbSeances = s?.activites?.size,
+    longueSortie = seances?.any { it.endurance && it.dureeMin >= Labo.LONGUE_SORTIE_MIN },
+    minutesSeances = seances?.sumOf { it.dureeMin },
+    nbSeances = seances?.size,
     pasTotal = s?.pasTotal,
     pasHorsSport = s?.pasHorsSport,
     graissePct = s?.graissePct,

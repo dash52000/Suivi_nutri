@@ -33,7 +33,6 @@ import androidx.health.connect.client.PermissionController
 import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
-import io.github.dash52000.suivinutri.health.DiagnosticCalories
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.health.Journee
 import io.github.dash52000.suivinutri.labo.DiagnosticPas
@@ -50,13 +49,15 @@ sealed interface EtatDonnees {
     data class Autorisation(val permissions: Set<String>, val dejaRefuse: Boolean) : EtatDonnees
     data class Donnees(
         val jours: List<Journee>,
-        val diagnostic: DiagnosticCalories,
         val historique: Boolean,
         /** Composition corporelle (balance Withings) pas encore autorisée. */
         val compositionManquante: Boolean = false,
         /** Pas (v1.10) pas encore autorisés ; sinon taille des tranches de pas d'hier. */
         val pasManquants: Boolean = false,
         val diagnosticPas: DiagnosticPas? = null,
+        /** VFC de la nuit (v1.11) pas encore autorisée ; sinon ce que Health Connect en a reçu sur 7 jours. */
+        val vfcManquante: Boolean = false,
+        val diagnosticVfc: HealthData.DiagnosticVfc? = null,
     ) : EtatDonnees
     data class Erreur(val message: String) : EtatDonnees
 }
@@ -74,11 +75,12 @@ private suspend fun charger(context: Context, health: HealthData, demandeFaite: 
     val aujourdHui = LocalDate.now()
     return EtatDonnees.Donnees(
         jours = health.journees(aujourdHui.minusDays(13), aujourdHui),
-        diagnostic = health.diagnosticCalories(aujourdHui.minusDays(1)),
         historique = HealthData.PERMISSION_HISTORIQUE in accordees,
         compositionManquante = !accordees.containsAll(HealthData.PERMISSIONS_COMPOSITION),
         pasManquants = !accordees.containsAll(HealthData.PERMISSIONS_PAS),
         diagnosticPas = health.diagnosticPas(aujourdHui.minusDays(1)),
+        vfcManquante = !accordees.containsAll(HealthData.PERMISSIONS_VFC),
+        diagnosticVfc = health.diagnosticVfc(aujourdHui),
     )
 }
 
@@ -162,6 +164,7 @@ fun EcranDonnees(health: HealthData, journal: Journal, config: Configuration, mo
                 onActualiser = { rafraichir++ },
                 onComposition = { demanderAcces.launch(HealthData.PERMISSIONS_COMPOSITION) },
                 onPas = { demanderAcces.launch(HealthData.PERMISSIONS_PAS) },
+                onVfc = { demanderAcces.launch(HealthData.PERMISSIONS_VFC) },
             )
         }
     }
@@ -187,6 +190,7 @@ private fun ListeDonnees(
     onActualiser: () -> Unit,
     onComposition: () -> Unit,
     onPas: () -> Unit,
+    onVfc: () -> Unit,
 ) {
     LazyColumn(
         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -225,8 +229,21 @@ private fun ListeDonnees(
                 }
             }
         }
-        item { CarteDiagnostic(etat.diagnostic) }
+        if (etat.vfcManquante) item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("VFC de la nuit", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "Autorise la lecture de la VFC : on vérifie d'abord si Garmin l'envoie à Health Connect, " +
+                            "avant de s'en servir dans le labo.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onVfc) { Text("Autoriser la VFC") }
+                }
+            }
+        }
         etat.diagnosticPas?.let { d -> item { CarteDiagnosticPas(d) } }
+        etat.diagnosticVfc?.let { d -> item { CarteDiagnosticVfc(d) } }
         item {
             Text(
                 "14 derniers jours",
@@ -252,12 +269,18 @@ private fun kcal(x: Double?): String =
 private fun dureeHeures(min: Long): String = "${min / 60} h ${"%02d".format(min % 60)}"
 
 @Composable
-private fun CarteDiagnostic(d: DiagnosticCalories) {
+private fun CarteDiagnosticVfc(d: HealthData.DiagnosticVfc) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Test du double comptage — hier", style = MaterialTheme.typography.titleSmall)
-            Text("Total agrégé : ${kcal(d.totalAgrege)}")
-            Text("Enregistrements bruts : ${d.nbEnregistrements}, somme naïve : ${kcal(d.sommeNaive)}")
+            Text("VFC — 7 derniers jours", style = MaterialTheme.typography.titleSmall)
+            if (d.nbMesures == 0) {
+                Text("Aucune VFC reçue : Garmin ne l'envoie pas à Health Connect (ou pas encore).")
+            } else {
+                Text(
+                    "${d.nbMesures} mesure(s) sur ${d.nbNuits} nuit(s)" +
+                        (d.moyenneMs?.let { ", moyenne ${String.format(Locale.FRENCH, "%.0f", it)} ms" } ?: "") + "."
+                )
+            }
             Text(
                 "Sources : " + d.sources.ifEmpty { listOf("aucune") }.joinToString(),
                 style = MaterialTheme.typography.bodySmall,

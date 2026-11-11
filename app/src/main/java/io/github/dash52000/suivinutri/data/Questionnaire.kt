@@ -90,6 +90,19 @@ object Questionnaire {
 
         Question("cafes", "Cafés aujourd'hui", options("0" to "0", "1" to "1", "2" to "2", "3+" to "3+"), moment = Moment.JOURNEE),
 
+        // v1.11 : protéines estimées en portions (whey 25 g, œuf 6 g, viande ou poisson 25 g).
+        Question("whey", "Whey (doses de 25 g)", options("0" to "0", "1" to "1", "2" to "2", "3" to "3"), moment = Moment.JOURNEE),
+        Question(
+            "oeufs", "Œufs",
+            options("0" to "0", "1" to "1", "2" to "2", "3" to "3", "4" to "4", "5" to "5", "6" to "6+"),
+            moment = Moment.JOURNEE,
+        ),
+        Question(
+            "viande", "Viande ou poisson (portions de 100-120 g)",
+            options("0" to "0", "1" to "1", "2" to "2", "3" to "3+"),
+            moment = Moment.JOURNEE,
+        ),
+
         Question("fringale", "Fringale en séance ?", OUI_NON, Condition.SEANCE, Moment.JOURNEE, ressenti = true),
         Question(
             "energie", "Énergie aujourd'hui",

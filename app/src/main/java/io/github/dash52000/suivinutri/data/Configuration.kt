@@ -43,6 +43,12 @@ class Configuration(context: Context) {
                 .putBoolean(MIGRATION_V17, true)
                 .apply()
         }
+        if (!prefs.getBoolean(MIGRATION_V111, false)) {
+            prefs.edit()
+                .putStringSet("en_pause", enPause() + PAUSE_V111)
+                .putBoolean(MIGRATION_V111, true)
+                .apply()
+        }
     }
 
     fun enPause(): Set<String> = prefs.getStringSet("en_pause", emptySet()).orEmpty().toSet()
@@ -155,6 +161,11 @@ class Configuration(context: Context) {
         val PAUSE_V17 = setOf("faim_coucher", "collation")
 
         fun pausesV17(actuelles: Set<String>): Set<String> = actuelles + PAUSE_V17
+
+        private const val MIGRATION_V111 = "migration_v111"
+
+        /** v1.11 : cafés et énergie ne servent à aucun calcul de l'appli (revue du 11/11/2026), en pause. */
+        val PAUSE_V111 = setOf("cafes", "energie")
 
         /** Identifiant lisible pour R : minuscules, sans accents, mots séparés par « _ ». */
         fun slug(texte: String): String =
