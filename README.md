@@ -95,7 +95,8 @@ Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.
   maigre sont corrélées : ρ = −0,75 brutes, −0,15 corrigées par l'eau (au prorata des mesures corrigées
   de la semaine). En simulation avec de l'eau transitoire et une bio-impédance bruitée, l'erreur passe
   d'environ 106 à 46-70 kcal/j.
-- **Apports estimés sans composition** : dépense moyenne + Δ niveau lissé (lundi matin → lundi matin) × 7 700 ÷ 7,
+- **Apports estimés sans composition** : dépense moyenne + Δ niveau lissé (dimanche matin → dimanche matin, comme
+  le Cap) × ρ ÷ 7, avec ρ = 8 840 kcal/kg (Hall, v1.13 ; la dépense est mesurée, donc le terme ε y est déjà),
   avec IC 95 % tiré de la covariance a posteriori des deux niveaux (covariance croisée du lisseur).
   Semaine complète : ≥ 3 pesées retenues et ≥ 5 jours de dépense. Semaine en cours dès 2 jours écoulés.
 - **Affichage des apports** (v1.8) : une barre par semaine complète, puis les 7 derniers jours en creux
@@ -179,7 +180,9 @@ boisson saisie.
   semaine, graisse et maigre sur 4 semaines, protection du muscle, effort déclaré et face-à-face mensuel,
   propositions de levier et de budget à valider ; mécanismes en probabilités bayésiennes à lieu de dîner égal,
   levier comparé aux leviers non choisis ; portions de protéines réglables
-- **v1.13** (à évaluer) : horizon eau en modèle espace-état, apports par le modèle inverse de Hall, VFC si Garmin
-  l'envoie
+- **v1.13** : apports du Labo avec ρ de Hall au lieu des 7 700 kcal/kg et semaines du dimanche (simulation :
+  biais +43 → 0 kcal/j, couverture de l'IC 95 % 88 → 95 %) ; calcul du Cap hors du fil principal, erreur affichée
+- **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
+  l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

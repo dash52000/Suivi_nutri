@@ -181,16 +181,17 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         "Apports estimés",
         "Dépense moyenne + énergie stockée ou déstockée. Avec la balance : masse grasse × 9 440 kcal/kg + masse " +
             "maigre × 1 816 kcal/kg (l'eau et le glycogène ne comptent presque plus comme de la graisse). " +
-            "Sans composition : variation du poids × 7 700 kcal/kg. Intervalle à 95 % lié aux mesures. " +
+            "Sans composition : variation du poids × 8 840 kcal/kg (modèle de Hall, comme le Cap). " +
+            "Intervalle à 95 % lié aux mesures. " +
             "Les jours sans montre (ni sommeil ni séance, moins de 2 000 kcal) sont écartés de la dépense. " +
-            "Une barre par semaine complète (lundi matin → lundi matin), la dernière en creux pour les 7 derniers " +
+            "Une barre par semaine complète (dimanche matin → dimanche matin, comme le Cap), la dernière en creux pour les 7 derniers " +
             "jours (pesée d'il y a 7 jours → pesée de ce matin). " +
             "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
             "fie-toi aux variations, pas au chiffre brut.",
     ) {
         val aujourdHui = etat.dates28.last()
-        // Semaines complètes finies avant aujourd'hui (le lundi, la dernière est déjà les 7 derniers jours).
-        val serie = r.semaines.filter { !it.enCours && it.lundi.plusDays(7).isBefore(aujourdHui) } +
+        // Semaines complètes finies avant aujourd'hui (le dimanche, la dernière est déjà les 7 derniers jours).
+        val serie = r.semaines.filter { !it.enCours && it.debut.plusDays(7).isBefore(aujourdHui) } +
             listOfNotNull(r.septDerniersJours)
         if (serie.isEmpty()) {
             Ligne(

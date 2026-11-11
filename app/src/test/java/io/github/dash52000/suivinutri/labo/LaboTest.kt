@@ -67,27 +67,30 @@ class LaboTest {
         assertNotNull(effetDessert.p)
     }
 
-    /** Dépense 2 500 kcal/j, perte de 0,1 kg/j : apports ≈ 2 500 − 770 = 1 730 (référence 1 725,39 en semaine 5). */
+    /**
+     * Dépense 2 500 kcal/j, perte de 0,1 kg/j. Références numpy avec 7 700 kcal/kg (1 725,39 en semaine 5,
+     * écart-type 135,409 ; 7 derniers jours 1 728,567), ramenées à ρ = 8 840 (v1.13) : l'énergie stockée et son
+     * écart-type sont proportionnels à la densité.
+     */
     @Test
     fun apportsEstimesAvecIntervalle() {
-        val lundi = LocalDate.of(2026, 8, 3) // un lundi
+        val k = Hall.RHO / 7700.0
+        val lundi = LocalDate.of(2026, 8, 2) // un dimanche
         val jours = (0L until 71L).map { k -> JourLabo(date = lundi.plusDays(k), poids = 85.0 - 0.1 * k, kcal = 2500.0) }
         val r = Labo.analyser(jours, lundi.plusDays(70))
-        val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
+        val s5 = r.semaines.first { it.debut == lundi.plusWeeks(5) }
         assertFalse(s5.enCours)
         assertEquals(Methode.POIDS, s5.methode)
         assertEquals(2500.0, s5.depenseMoyenne, 1e-9)
-        assertEquals(1725.39, s5.apportsEstimes, 0.05)
-        // Écart-type de référence 135,409 kcal/j : demi-largeur de l'IC = 1,96 × 135,409.
-        assertEquals(1.959964 * 135.409, (s5.apports.haut - s5.apports.bas) / 2, 0.05)
+        assertEquals(2500 - (2500 - 1725.39) * k, s5.apportsEstimes, 0.06)
+        assertEquals(1.959964 * 135.409 * k, (s5.apports.haut - s5.apports.bas) / 2, 0.06)
 
-        // 7 derniers jours : J63 → J70 ; aujourd'hui est un lundi, ils reproduisent la semaine 9.
-        // Référence numpy : 1 728,567.
+        // 7 derniers jours : J63 → J70 ; aujourd'hui est un dimanche, ils reproduisent la semaine 9.
         val sept = r.septDerniersJours!!
-        assertEquals(lundi.plusDays(63), sept.lundi)
+        assertEquals(lundi.plusDays(63), sept.debut)
         assertTrue(sept.enCours)
-        assertEquals(1728.567, sept.apportsEstimes, 0.01)
-        assertEquals(r.semaines.first { it.lundi == lundi.plusWeeks(9) }.apportsEstimes, sept.apportsEstimes, 1e-9)
+        assertEquals(2500 - (2500 - 1728.567) * k, sept.apportsEstimes, 0.012)
+        assertEquals(r.semaines.first { it.debut == lundi.plusWeeks(9) }.apportsEstimes, sept.apportsEstimes, 1e-9)
     }
 
     /**
@@ -97,14 +100,14 @@ class LaboTest {
      */
     @Test
     fun apportsParCompartiments() {
-        val lundi = LocalDate.of(2026, 8, 3)
+        val lundi = LocalDate.of(2026, 8, 2) // un dimanche
         val jours = (0L until 71L).map { k ->
             val fm = 22 - 0.05 * k
             val ffm = 66 - 0.015 * k
             JourLabo(date = lundi.plusDays(k), poids = fm + ffm, graissePct = 100 * fm / (fm + ffm), kcal = 2500.0)
         }
         val r = Labo.analyser(jours, lundi.plusDays(70))
-        val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
+        val s5 = r.semaines.first { it.debut == lundi.plusWeeks(5) }
         assertEquals(Methode.COMPOSITION, s5.methode)
         assertEquals(-0.349602, s5.deltaGraisseKg!!, 1e-5)
         assertEquals(-0.105158, s5.deltaMaigreKg!!, 1e-5)
@@ -120,7 +123,7 @@ class LaboTest {
      */
     @Test
     fun apportsParCompartimentsCorrigesParLEau() {
-        val lundi = LocalDate.of(2026, 8, 3)
+        val lundi = LocalDate.of(2026, 8, 2) // un dimanche
         val jours = (0L until 71L).map { k ->
             val fm = 22 - 0.05 * k
             val ffm = 66 - 0.015 * k
@@ -130,7 +133,7 @@ class LaboTest {
             )
         }
         val r = Labo.analyser(jours, lundi.plusDays(70))
-        val s5 = r.semaines.first { it.lundi == lundi.plusWeeks(5) }
+        val s5 = r.semaines.first { it.debut == lundi.plusWeeks(5) }
         assertEquals(Methode.COMPOSITION, s5.methode)
         assertEquals(-0.350343, s5.deltaGraisseKg!!, 1e-5)
         assertEquals(-0.105073, s5.deltaMaigreKg!!, 1e-5)
@@ -200,7 +203,7 @@ class LaboTest {
         assertNull(Labo.kcalRetenue(j(null, sommeil = 420)))
 
         // Une semaine avec deux jours sans montre : la dépense moyenne ne compte que les cinq autres.
-        val lundi = LocalDate.of(2026, 8, 3)
+        val lundi = LocalDate.of(2026, 8, 2) // un dimanche
         val jours = (0L until 21L).map { k ->
             val sansMontre = k in 7L..8L
             JourLabo(
@@ -209,15 +212,15 @@ class LaboTest {
             )
         }
         val r = Labo.analyser(jours, lundi.plusDays(20))
-        val s1 = r.semaines.first { it.lundi == lundi.plusWeeks(1) }
+        val s1 = r.semaines.first { it.debut == lundi.plusWeeks(1) }
         assertEquals(5, s1.nbJoursDepense)
         assertEquals(2600.0, s1.depenseMoyenne, 1e-9)
     }
 
     @Test
     fun semaineEnCoursApresDeuxJours() {
-        val lundi = LocalDate.of(2026, 10, 26)
-        val aujourdHui = lundi.plusWeeks(1).plusDays(3) // jeudi
+        val lundi = LocalDate.of(2026, 10, 25) // un dimanche
+        val aujourdHui = lundi.plusWeeks(1).plusDays(3) // mercredi
         val jours = (0L..10L).map { k -> JourLabo(date = lundi.plusDays(k), poids = 88.0, kcal = 2600.0) }
         val r = Labo.analyser(jours, aujourdHui)
         val enCours = r.semaines.first()

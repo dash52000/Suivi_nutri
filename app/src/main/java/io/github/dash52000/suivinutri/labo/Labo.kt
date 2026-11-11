@@ -45,7 +45,7 @@ data class JourLabo(
 
 /** Comment les apports d'une semaine ont été estimés. */
 enum class Methode(val libelle: String) {
-    POIDS("variation du poids × 7 700 kcal/kg"),
+    POIDS("variation du poids × 8 840 kcal/kg (Hall)"),
     COMPOSITION("masse grasse × 9 440 + masse maigre × 1 816 kcal/kg"),
 }
 
@@ -79,11 +79,12 @@ data class PointPoids(
 }
 
 /**
- * Apports estimés d'une semaine (ou des jours écoulés de la semaine en cours) :
- * dépense moyenne + variation du niveau lissé × 7 700 kcal/kg ÷ nombre de jours, avec IC 95 %.
+ * Apports estimés d'une semaine (ou des jours écoulés de la semaine en cours) : dépense moyenne mesurée par la
+ * montre + énergie stockée ou déstockée ÷ nombre de jours, avec IC 95 %. [debut] = premier jour de la période
+ * (un dimanche depuis la v1.13 pour les semaines complètes).
  */
 data class SemaineApports(
-    val lundi: LocalDate,
+    val debut: LocalDate,
     val depenseMoyenne: Double,
     val deltaTendanceKg: Double,
     val apports: Intervalle,
@@ -145,7 +146,7 @@ data class ResultatLabo(
     val composition: ResumeComposition? = null,
     val semaines: List<SemaineApports>,
     /**
-     * Les 7 derniers jours : pesée d'il y a 7 jours → pesée de ce matin ([SemaineApports.lundi] = premier jour,
+     * Les 7 derniers jours : pesée d'il y a 7 jours → pesée de ce matin ([SemaineApports.debut] = premier jour,
      * [SemaineApports.enCours] = vrai). Null sans assez de données.
      */
     val septDerniersJours: SemaineApports? = null,
@@ -160,7 +161,11 @@ data class ResultatLabo(
 
 object Labo {
 
-    const val KCAL_PAR_KG = 7700.0
+    /**
+     * Densité d'une variation de poids : ρ de Hall (v1.13, au lieu de la règle des 7 700). La dépense est mesurée
+     * par la montre, donc le terme ε de Hall (la dépense qui baisse avec le poids) y est déjà : seul ρ sert ici.
+     */
+    const val KCAL_PAR_KG = Hall.RHO
 
     /** Densités énergétiques de Kevin Hall (2008) : 39,5 MJ/kg de graisse, 7,6 MJ/kg de masse maigre. */
     const val KCAL_PAR_KG_GRAISSE = 9440.0
@@ -456,7 +461,7 @@ object Labo {
         return ResultatLabo(
             poids = poids,
             composition = resume,
-            semaines = semaines.sortedByDescending { it.lundi },
+            semaines = semaines.sortedByDescending { it.debut },
             septDerniersJours = septDerniersJours,
             lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
             croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
@@ -519,7 +524,7 @@ object Labo {
             se = sqrt(lis.varDifference(i, jours)) * parKg
         }
         return SemaineApports(
-            lundi = debut,
+            debut = debut,
             depenseMoyenne = kcal.average(),
             deltaTendanceKg = delta,
             apports = Intervalle(estimation, estimation - Stats.Z975 * se, estimation + Stats.Z975 * se),
@@ -534,10 +539,9 @@ object Labo {
     }
 
     /**
-     * Semaines complètes (lundi matin → lundi matin suivant) avec au moins 3 pesées retenues et 5 jours de
-     * dépense, puis la semaine en cours dès 2 jours écoulés. Le niveau lissé du lundi matin reflète ce qui a
-     * été mangé jusqu'au dimanche soir. Elles servent aux effets sur plusieurs semaines : des périodes qui ne se
-     * chevauchent pas.
+     * Semaines complètes (dimanche matin → dimanche matin suivant, comme le Cap depuis la v1.11) avec au moins
+     * 3 pesées retenues et 5 jours de dépense, puis la semaine en cours dès 2 jours écoulés. Le niveau lissé du
+     * dimanche matin reflète ce qui a été mangé jusqu'au samedi soir.
      */
     private fun semaines(
         parDate: Map<LocalDate, JourLabo>,
@@ -546,19 +550,19 @@ object Labo {
         aujourdHui: LocalDate,
     ): List<SemaineApports> {
         val resultat = mutableListOf<SemaineApports>()
-        val lundiCourant = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
-        var lundi = lis.debut.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
-        while (lundi.isBefore(lundiCourant)) {
-            val periode = (0L until 7L).map { lundi.plusDays(it) }
-            estimerPeriode(parDate, lis, comp, lundi, 7, periode, enCours = false, minPesees = 3, minDepense = 5)
+        val dimancheCourant = aujourdHui.with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
+        var dimanche = lis.debut.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        while (dimanche.isBefore(dimancheCourant)) {
+            val periode = (0L until 7L).map { dimanche.plusDays(it) }
+            estimerPeriode(parDate, lis, comp, dimanche, 7, periode, enCours = false, minPesees = 3, minDepense = 5)
                 ?.let { resultat += it }
-            lundi = lundi.plusWeeks(1)
+            dimanche = dimanche.plusWeeks(1)
         }
-        val ecoules = ChronoUnit.DAYS.between(lundiCourant, aujourdHui).toInt()
+        val ecoules = ChronoUnit.DAYS.between(dimancheCourant, aujourdHui).toInt()
         if (ecoules >= 2) {
             // Semaine en cours : la pesée de ce matin compte aussi.
-            val joursPesees = (0L..ecoules.toLong()).map { lundiCourant.plusDays(it) }
-            estimerPeriode(parDate, lis, comp, lundiCourant, ecoules, joursPesees, enCours = true, minPesees = 1, minDepense = 2)
+            val joursPesees = (0L..ecoules.toLong()).map { dimancheCourant.plusDays(it) }
+            estimerPeriode(parDate, lis, comp, dimancheCourant, ecoules, joursPesees, enCours = true, minPesees = 1, minDepense = 2)
                 ?.let { resultat += it }
         }
         return resultat

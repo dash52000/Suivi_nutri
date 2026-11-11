@@ -63,6 +63,8 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.time.temporal.TemporalAdjusters
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Données de l'onglet : le calcul du labo s'il a pu être fait, sinon le journal seul. */
 private class DonneesCap(
@@ -110,11 +112,26 @@ fun EcranCap(
     val reflexes = remember { Labo.reflexes + perso }
     val enPause = remember { config.enPause() }
     val d = donnees
-    val resultat = remember(d, etat) {
-        d?.let { Cap.analyser(it.jours, it.lissage, etat, aujourdHui, reflexes) }
+    // Calcul du Cap hors du fil principal (v1.13) : une tendance figée par semaine finie. Pendant un recalcul
+    // (levier choisi, budget validé), le résultat précédent reste affiché.
+    var resultatCap by remember { mutableStateOf<ResultatCap?>(null) }
+    var erreurCap by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(d, etat) {
+        if (d == null) {
+            resultatCap = null
+            return@LaunchedEffect
+        }
+        val e = etat
+        val r = withContext(Dispatchers.Default) {
+            runCatching { Cap.analyser(d.jours, d.lissage, e, aujourdHui, reflexes) }
+        }
+        r.onSuccess { resultatCap = it; erreurCap = null }.onFailure { ex ->
+            erreurCap = ex.message ?: ex.javaClass.simpleName
+            Usage.log(context, "cap_erreur", erreurCap!!)
+        }
     }
-    LaunchedEffect(resultat?.budgetCourant) {
-        resultat?.let {
+    LaunchedEffect(resultatCap?.budgetCourant) {
+        resultatCap?.let {
             objectif.memoriserBudgetCourant(it.budgetCourant)
             Signal.programmer(context)
         }
@@ -127,13 +144,26 @@ fun EcranCap(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        val resultat = resultatCap
         if (d == null || resultat == null) {
-            Text("Lecture de la tendance du poids…", style = MaterialTheme.typography.bodyMedium)
-            CircularProgressIndicator()
+            val err = erreurCap
+            if (d != null && err != null) {
+                Text("Calcul du cap impossible : $err", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            } else {
+                Text("Lecture de la tendance du poids…", style = MaterialTheme.typography.bodyMedium)
+                CircularProgressIndicator()
+            }
             return@Column
         }
         d.erreur?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+        }
+        erreurCap?.let {
+            Text(
+                "Dernier calcul du cap impossible ($it) : le résultat affiché est le précédent.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
         }
         d.erreurPas?.let {
             Text(

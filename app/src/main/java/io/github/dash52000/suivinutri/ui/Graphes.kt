@@ -67,7 +67,7 @@ private fun Legende(texte: String, couleur: Color) {
 
 @Composable
 fun GrapheSemaines(semaines: List<SemaineApports>) {
-    val serie = semaines.sortedBy { it.lundi }.takeLast(12)
+    val serie = semaines.sortedBy { it.debut }.takeLast(12)
     if (serie.isEmpty()) return
     val p = palette()
     // Échelle sur les estimations et les intervalles des semaines complètes ; celui de la semaine en cours,
@@ -122,11 +122,11 @@ fun GrapheSemaines(semaines: List<SemaineApports>) {
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "${nombre(min, 0)} kcal/j · sem. du ${serie.first().lundi.format(formatCourt)}",
+                    "${nombre(min, 0)} kcal/j · sem. du ${serie.first().debut.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Text(
-                    if (serie.last().enCours) "7 derniers jours" else "sem. du ${serie.last().lundi.format(formatCourt)}",
+                    if (serie.last().enCours) "7 derniers jours" else "sem. du ${serie.last().debut.format(formatCourt)}",
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
