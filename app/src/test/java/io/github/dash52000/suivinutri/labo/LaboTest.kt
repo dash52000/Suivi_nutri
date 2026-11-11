@@ -263,7 +263,10 @@ class LaboTest {
         assertEquals(36, alcool.n0)
     }
 
-    /** Les soirs « pris ton temps » n'ont jamais de rab, les autres toujours : écart de −100 points. */
+    /**
+     * Les soirs « pris ton temps » n'ont jamais de rab, les autres toujours. Depuis la v1.12, le Labo le lit en
+     * probabilités bayésiennes (Mecanismes), plus en différence de proportions parmi les effets croisés.
+     */
     @Test
     fun mecanismePrisTonTempsContreRab() {
         val jours = (0L until 20L).map { k ->
@@ -277,13 +280,15 @@ class LaboTest {
             )
         }
         val r = Labo.analyser(jours, debut.plusDays(19))
-        val effet = r.croises.first { it.mecanisme && it.exposition.contains("pris ton temps") }
+        val effet = r.mecanismes.first { it.libelle == "Pris ton temps" }
         assertEquals(10, effet.n1)
         assertEquals(10, effet.n0)
         assertEquals(0.0, effet.p1!!, 0.0)
         assertEquals(1.0, effet.p0!!, 0.0)
-        assertEquals(-1.0, effet.ecart!!.estimation, 1e-12)
-        assertEquals(5, r.croises.count { it.mecanisme })
+        assertTrue(effet.ecart!!.estimation < -0.5) // tiré vers zéro par l'a priori sceptique
+        assertEquals(Niveau.SOLIDE, effet.niveau)
+        assertEquals(0, r.croises.count { it.mecanisme })
+        assertEquals(Mecanismes.liste.size, r.mecanismes.size)
     }
 
     @Test

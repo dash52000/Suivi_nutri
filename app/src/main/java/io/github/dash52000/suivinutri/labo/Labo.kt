@@ -1,6 +1,7 @@
 package io.github.dash52000.suivinutri.labo
 
 import io.github.dash52000.suivinutri.data.EntreeJour
+import io.github.dash52000.suivinutri.data.Portions
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
@@ -21,8 +22,10 @@ data class JourLabo(
     /** Séance d'endurance d'au moins [Labo.LONGUE_SORTIE_MIN] minutes ; null si Health Connect n'a rien lu. */
     val longueSortie: Boolean? = null,
     val minutesSeances: Long? = null,
-    /** Nombre de séances du jour ; null si Health Connect n'a rien lu. */
+    /** Nombre de séances du jour (hors marches) ; null si Health Connect n'a rien lu. */
     val nbSeances: Int? = null,
+    /** Séances de renfo du jour (v1.12). */
+    val nbRenfos: Int? = null,
     /** Pas de la montre, et sans ceux des séances (v1.10) ; null sans autorisation ou sans donnée. */
     val pasTotal: Long? = null,
     val pasHorsSport: Long? = null,
@@ -151,6 +154,8 @@ data class ResultatLabo(
     val qualite: Qualite,
     /** Tendance du poids (corrigée de l'eau), calculée une seule fois et partagée avec le Cap (v1.11). */
     val lissage: Kalman.Lissage? = null,
+    /** Mécanismes des réflexes en probabilités bayésiennes, à lieu de dîner égal (v1.12). */
+    val mecanismes: List<ResultatMecanisme> = emptyList(),
 )
 
 object Labo {
@@ -252,12 +257,11 @@ object Labo {
         }
     }
 
+    /** Unités d'alcool d'un jour renseigné (null sans réponse, ou « oui » sans boisson saisie). */
+    fun unitesDuJour(e: EntreeJour?): Double? = unites(e)
+
     // ---------- Protéines (v1.11) ----------
 
-    /** Protéines par portion déclarée : whey (une dose), œuf, viande ou poisson (100 à 120 g cuits). */
-    const val PROT_WHEY = 25.0
-    const val PROT_OEUF = 6.0
-    const val PROT_VIANDE = 25.0
     const val ID_WHEY = "whey"
     const val ID_OEUFS = "oeufs"
     const val ID_VIANDE = "viande"
@@ -268,12 +272,12 @@ object Labo {
      * Protéines du jour estimées en grammes (whey, œufs, viande / poisson) ; null si l'une des trois questions est
      * sans réponse. Laitages et légumineuses ne sont pas comptés : sous-estimation systématique.
      */
-    fun proteinesG(e: EntreeJour?): Double? {
+    fun proteinesG(e: EntreeJour?, p: Portions = Portions()): Double? {
         if (e == null) return null
         val whey = nombrePortions(e.rep(ID_WHEY)) ?: return null
         val oeufs = nombrePortions(e.rep(ID_OEUFS)) ?: return null
         val viande = nombrePortions(e.rep(ID_VIANDE)) ?: return null
-        return whey * PROT_WHEY + oeufs * PROT_OEUF + viande * PROT_VIANDE
+        return whey * p.whey + oeufs * p.oeuf + viande * p.viande
     }
 
     // ---------- Poids ----------
@@ -458,6 +462,7 @@ object Labo {
             croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
             qualite = qualite(tries, parDate, aujourdHui),
             lissage = lis,
+            mecanismes = Mecanismes.evaluer(tries.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap(), aujourdHui, enPause),
         )
     }
 
@@ -700,17 +705,10 @@ object Labo {
         fun ouiNon(id: String): (JourLabo) -> Boolean? = { j ->
             when (j.entree?.rep(id)) { "oui" -> true; "non" -> false; else -> null }
         }
-        // « À moitié » et « pas fait gaffe » sont exclus : on compare des soirs francs.
-        val pasDeRab: (JourLabo) -> Boolean? = { j -> rab(j.entree)?.not() }
 
         val croisements = listOf(
-            // Mécanismes : chaque réflexe fait-il, le soir même, ce pour quoi il a été conçu ?
-            Croisement("Soirs où tu as pris ton temps", "les soirs mangés vite", "rab le soir", ouiNon("temps"), rabSoir, true, setOf("temps", "resservi")),
-            Croisement("Soirs avec les boîtes posées", "sans les boîtes", "rab le soir", ouiNon("boites"), rabSoir, true, setOf("boites", "resservi")),
-            Croisement("Soirs où le plaisir a baissé", "quand il n'a pas baissé", "rab le soir", ouiNon("plaisir_baisse"), rabSoir, true, setOf("plaisir_baisse", "resservi")),
-            Croisement("Jours avec collation", "sans collation", "fringale en séance", ouiNon("collation"), ouiNon("fringale"), true, setOf("collation", "fringale")),
-            Croisement("Soirs sans rab", "les soirs avec rab", "faim au coucher", pasDeRab, ouiNon("faim_coucher"), true, setOf("resservi", "faim_coucher")),
-
+            // Les mécanismes des réflexes (pris ton temps, boîtes, plaisir → rab) sont en probabilités bayésiennes
+            // depuis la v1.12 : voir Mecanismes.
             Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir, ids = setOf("resservi")),
             Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "dessert pris", nuitCourte, dessertSoir, ids = setOf("dessert")),
             Croisement("Le lendemain d'un soir avec alcool", "le lendemain d'un soir sans", "rab le soir", alcoolVeille, rabSoir, ids = setOf("alcool", "resservi")),

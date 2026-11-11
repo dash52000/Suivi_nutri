@@ -36,6 +36,8 @@ import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.Labo
+import io.github.dash52000.suivinutri.labo.Niveau
+import io.github.dash52000.suivinutri.labo.ResultatMecanisme
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
 import io.github.dash52000.suivinutri.labo.Stats
@@ -137,11 +139,13 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
 
     Section(
         "Tes réflexes font-ils leur effet ?",
-        "Chaque réflexe testé sur ce pour quoi il a été pensé, le jour même : fréquence du rab, de la fringale " +
-            "ou de la faim au coucher selon que le réflexe a été tenu ou non (écart en points de pourcentage). " +
-            "Pas de bruit de pesée ici : c'est le premier endroit où des résultats apparaîtront.",
+        "Chaque réflexe testé sur ce pour quoi il a été pensé, le soir même : fréquence du rab selon que le réflexe " +
+            "a été tenu ou non, à lieu de dîner égal (écart en points). La probabilité dit à quel point l'appli est sûre " +
+            "que le réflexe réduit le rab : piste à 70 %, probable à 90 %, solide à 97,5 % avec assez de soirs. Une " +
+            "piste se trompe une fois sur trois, c'est normal. Pas de bruit de pesée ici : c'est le premier endroit où " +
+            "des résultats apparaîtront.",
     ) {
-        ForestPlot(r.croises.filter { it.mecanisme }.map { itemCroise(it) }, "pts", 0)
+        ForestPlot(r.mecanismes.map { itemMecanisme(it) }, "pts", 0)
     }
 
     val masquerPesee = Affichage.masquerPesee(LocalContext.current)
@@ -257,6 +261,27 @@ private fun itemLendemain(e: EffetLendemain): ItemForest {
         "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} jours contre ${e.n0}" + verdict(e.q)
     }
     return ItemForest(e.libelle, j1, detail, net(e.q))
+}
+
+private fun itemMecanisme(m: ResultatMecanisme): ItemForest {
+    val libelle = "${m.libelle} → ${m.issue}"
+    val ecart = m.ecart
+    if (ecart == null || m.probReduit == null || m.p1 == null || m.p0 == null) {
+        return ItemForest(
+            libelle, null,
+            "Pas encore assez de soirs à comparer : ${m.n1} tenu(s), ${m.n0} pas tenu(s), " +
+                "à lieu de dîner égal (${Niveau.PISTE.minParGroupe} de chaque au minimum).",
+            false,
+        )
+    }
+    val niveau = when {
+        m.niveau != Niveau.AUCUN -> m.niveau.libelle
+        m.niveauInverse != Niveau.AUCUN -> "${m.niveauInverse.libelle} d'un effet inverse"
+        else -> "pas encore de piste"
+    }
+    val detail = "${pourcent(m.p1)} des soirs contre ${pourcent(m.p0)} quand il n'est pas tenu · probabilité que " +
+        "ça réduise le ${m.issue} : ${pourcent(m.probReduit)} ($niveau)"
+    return ItemForest(libelle, ecart.fois(100.0), detail, m.niveau >= Niveau.PROBABLE)
 }
 
 private fun itemCroise(e: EffetCroise): ItemForest {

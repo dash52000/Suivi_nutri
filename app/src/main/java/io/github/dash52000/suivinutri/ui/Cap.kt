@@ -108,6 +108,7 @@ fun EcranCap(
 
     val perso = remember { config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } } }
     val reflexes = remember { Labo.reflexes + perso }
+    val enPause = remember { config.enPause() }
     val d = donnees
     val resultat = remember(d, etat) {
         d?.let { Cap.analyser(it.jours, it.lissage, etat, aujourdHui, reflexes) }
@@ -142,6 +143,26 @@ fun EcranCap(
             )
         }
 
+        SectionBilan(
+            jours = d.jours,
+            etat = etat,
+            reflexes = reflexes,
+            enPause = enPause,
+            semaineDepart = resultat.semaineDepart,
+            aujourdHui = aujourdHui,
+            onVu = { dim -> Usage.log(context, "bilan_vu", "dimanche=$dim") },
+            onDecisionBudget = { dim, ecart, acceptee ->
+                objectif.deciderBudget(dim, ecart, acceptee)
+                Usage.log(context, "budget_decision", "dimanche=$dim;ecart=$ecart;acceptee=$acceptee")
+                etat = objectif.etat()
+            },
+            onChoisirLevier = { dim, libelle, proposes ->
+                objectif.choisirLevier(dim, libelle, proposes)
+                Usage.log(context, "levier", "semaine=$dim;levier=$libelle;depuis=bilan")
+                etat = objectif.etat()
+            },
+        )
+
         CarteCap(resultat, d.poids)
 
         CarteSemaine(
@@ -151,7 +172,7 @@ fun EcranCap(
             propositions = resultat.propositions,
             tous = reflexes.map { it.first } + Cap.LEVIER_PAS,
             onChoisir = { libelle ->
-                objectif.choisirLevier(resultat.semaineEnCours.debut, libelle)
+                objectif.choisirLevier(resultat.semaineEnCours.debut, libelle, resultat.propositions)
                 Usage.log(context, "levier", "semaine=${resultat.semaineEnCours.debut};levier=${libelle ?: "retire"}")
                 etat = objectif.etat()
             },
@@ -193,8 +214,8 @@ fun EcranCap(
                 "faible que le couloir. Plus vite : tout l'intervalle à 95 % au-delà. Sinon pas encore lisible (et " +
                 "toujours avec moins de ${Cap.MIN_PESEES} pesées dans la semaine). Les ${Cap.SEMAINES_RODAGE} premières semaines ne " +
                 "sont pas jugées : la tendance met environ 3 semaines à suivre un changement d'effort. Semaine du dimanche au samedi ; le " +
-                "verdict se fige à la pesée du dimanche matin. Bières en équivalent bouteille de 33 cl ; le budget reste " +
-                "figé jusqu'aux propositions du bilan du dimanche."
+                "verdict se fige à la pesée du dimanche matin. Bières en équivalent bouteille de 33 cl ; le budget ne change " +
+                "que par une proposition du bilan du dimanche que tu acceptes."
         )
         OutlinedButton(onClick = { forcer++ }) { Text("Recalculer maintenant") }
         Spacer(Modifier.height(16.dp))

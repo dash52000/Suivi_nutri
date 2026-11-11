@@ -458,17 +458,17 @@ private fun SectionObjectif(objectif: Objectif) {
             }
         }
         Text(
-            "Budget figé pour l'instant : à partir du bilan du dimanche, l'appli proposera une bière de moins après " +
-                "2 semaines de suite au-dessus du couloir, une de plus après 2 semaines dans le couloir, et c'est toi " +
-                "qui valideras.",
+            "Le bilan du dimanche propose une bière de moins après 2 semaines de suite au-dessus du couloir, une de " +
+                "plus après 2 semaines dans le couloir (sans dépasser ce budget de départ) ; c'est toi qui valides.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Signal de la semaine")
+                Text("Notif du bilan du dimanche")
                 Text(
-                    "Une notif par semaine au plus, à 18 h, le soir qui dérape le plus souvent (vendredi par défaut).",
+                    "Une notif par semaine, le dimanche à ${Signal.HEURE} h : ton bilan est prêt, et le soir à surveiller " +
+                        "dans la semaine qui vient.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -482,6 +482,31 @@ private fun SectionObjectif(objectif: Objectif) {
                     etat = objectif.etat()
                 },
             )
+        }
+        Text("Protéines par portion (g)", style = MaterialTheme.typography.labelLarge)
+        listOf(
+            Triple("Whey (une dose)", listOf(20.0, 25.0, 30.0), etat.portions.whey),
+            Triple("Œuf", listOf(6.0, 7.0), etat.portions.oeuf),
+            Triple("Viande ou poisson (100-120 g)", listOf(20.0, 25.0, 30.0), etat.portions.viande),
+        ).forEachIndexed { i, (libelle, choix, actuel) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(libelle, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                choix.forEach { g ->
+                    FilterChip(
+                        selected = actuel == g,
+                        onClick = {
+                            val p = etat.portions
+                            objectif.reglerPortions(
+                                when (i) { 0 -> p.copy(whey = g); 1 -> p.copy(oeuf = g); else -> p.copy(viande = g) }
+                            )
+                            Usage.log(context, "reglage", "portion_${i}=$g")
+                            etat = objectif.etat()
+                        },
+                        label = { Text(nombre(g, 0)) },
+                        modifier = Modifier.padding(start = 4.dp),
+                    )
+                }
+            }
         }
         OutlinedButton(onClick = { confirmerDepart = true }) { Text("Repartir de cette semaine") }
     }

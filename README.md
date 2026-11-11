@@ -39,15 +39,25 @@ Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.
   3 semaines à suivre un changement d'effort (−86, −196, −292 puis −353 kcal/j estimés pour un vrai −400).
 - **Simulation dans le build** (`SimulationCouloirTest`) : pesées + eau + bruit réel, 26 semaines. Effort tenu à −400 :
   au plus 20 % de propositions de baisse (≈ 10 %) ; effort à −250 : au moins 80 % ; appétit qui compense : au moins 90 %.
-- **Budget bière** : 3 bouteilles de 33 cl par semaine au départ (réglable). **Figé en v1.11** : la règle
-  (2 semaines au-dessus → −1, 2 semaines dans le couloir → +1) deviendra une proposition à valider au bilan du
-  dimanche (v1.12). Bières seulement (pils à quadrupel), en équivalent 33 cl ; « oui » sans boisson saisie = NA.
+- **Budget bière** : 3 bouteilles de 33 cl par semaine au départ (réglable). Depuis la v1.12, le bilan du dimanche
+  **propose** −1 après 2 semaines de suite au-dessus du couloir, +1 après 2 semaines dans le couloir (sans dépasser le
+  départ) ; rien ne change sans « Accepter ». Après une réponse, il faut 2 nouvelles semaines. Bières seulement (pils à
+  quadrupel), en équivalent 33 cl ; « oui » sans boisson saisie = NA.
+- **Bilan du dimanche** (v1.12, en haut du Cap, notif le dimanche à 19 h ; les bilans passés se relisent) :
+  1. le cap (effort, verdict, chemin depuis le départ face à la bande de Hall) ; 2. la balance de la semaine (pesées qui
+  sortent du lot, part de l'eau, ce qui s'est passé la veille et son effet habituel) ; 3. graisse et maigre sur 4
+  semaines ; 4. protection du muscle (renfos, protéines en g/kg/j, rythme) ; 5. effort déclaré (questionnaire en kcal/j
+  face aux habitudes des 4 semaines avant le départ : rab ≈ 300, dessert ≈ 250, alcool ≈ 70 kcal/unité × 1,5 pour la
+  bière, pas ≈ 0,045 kcal) et, toutes les 4 semaines à partir de la 8e, face-à-face avec l'effort mesuré ; 6. ce qu'on
+  a appris (liens passés à probable ou solide) ; 7. pour la semaine qui vient : bilan du levier écoulé face aux leviers
+  proposés non choisis (différence de différences), leviers proposés avec leur gain chiffré (kcal/semaine et kg en un
+  mois, modèle de Hall), proposition de budget, soir à surveiller, plan du week-end.
 - **Levier de la semaine** : 3 propositions, les réflexes les moins tenus des 14 derniers jours (au moins 3
   réponses), ou un autre au choix. Adhérence = soirs tenus / soirs renseignés. Pas de conclusion causale dans
   l'appli : R agrège les semaines (`levier_semaine`).
 - **Plan du week-end** (vendredi → dimanche) : 5 repas normal / dehors, bières prévues par jour. Du lundi au jeudi,
   comparaison avec le questionnaire (midi à l'extérieur, dîner chez les beaux-parents ou ailleurs, boissons).
-- **Signal de la semaine** : une notif au plus par semaine, à 18 h, le soir qui dérape le plus sur 8 semaines
+- **Signal de la semaine** (jusqu'à la v1.11, remplacé par la notif du bilan) : une notif au plus par semaine, à 18 h, le soir qui dérape le plus sur 8 semaines
   (rab, part normale de dessert ou ≥ 2 unités d'alcool ; au moins 3 soirs renseignés et 50 % de dérapages) ;
   vendredi par défaut, pour le plan du week-end. Désactivable.
 - **Pas hors sport** (v1.10) : pas Garmin du jour moins les pas faits pendant les séances (une tranche à
@@ -98,9 +108,12 @@ Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.
   métabolisme de base compté par Garmin (1 565 ou 1 675 kcal) ; elle est écartée, comme toute dépense
   sous 800 kcal.
   Niveau absolu probablement surestimé (dépense de la montre) : seules les variations comptent.
-- **Mécanismes des réflexes** (le jour même, sans bruit de pesée) : pris ton temps → rab, boîtes
-  posées → rab, plaisir baissé → rab, collation → fringale en séance, pas de rab → faim au coucher ;
-  différence de proportions (Agresti-Caffo), soirs francs seulement (« à moitié » exclu).
+- **Mécanismes des réflexes** (v1.12, le soir même, sans bruit de pesée) : pris ton temps, boîtes posées, plaisir
+  baissé, assiette ½ ¼ ¼ → rab. Probabilités bayésiennes : par lieu du dîner, loi bêta a priori centrée sur la
+  fréquence commune du rab, de force 4 soirs (sceptique), écart pondéré comme Mantel-Haenszel, 4 000 tirages à graine
+  fixe. Niveaux : piste ≥ 70 % (3 soirs par groupe), probable ≥ 90 % (5), solide ≥ 97,5 % (8). Simulation : sans effet,
+  « probable » sort dans 6 à 9 % des cas, « solide » dans environ 2 % ; avec un effet fort (20 % contre 60 % de rab),
+  « probable » 9 fois sur 10 à 20 soirs par groupe (`MecanismesTest`). Soirs francs seulement.
 - **Lendemain** : régression jointe de l'écart pesée − tendance à J+1 (J+2, J+3 pour la décroissance)
   sur toutes les expositions du soir J à la fois : rab et dessert sur 3 niveaux (0 ; 0,5 ; 1), alcool
   en unités, beaux-parents, longue sortie (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
@@ -162,9 +175,11 @@ boisson saisie.
   « oui » sans boisson = NA ; protéines en portions ; carte de vérification de la VFC ; ménage (bloc « plusieurs
   semaines », croisés sur questions en pause, cafés et énergie en pause, test du double comptage, tendance
   calculée une seule fois) ; simulation du couloir dans les tests du build
-- **v1.12** (prévue) : bilan du dimanche (dimanche 19 h, dans le Cap) : effort et bande de Hall, balance de la
+- **v1.12** : bilan du dimanche (dimanche 19 h, dans le Cap) : effort et bande de Hall, balance de la
   semaine, graisse et maigre sur 4 semaines, protection du muscle, effort déclaré et face-à-face mensuel,
   propositions de levier et de budget à valider ; mécanismes en probabilités bayésiennes à lieu de dîner égal,
-  levier comparé aux leviers non choisis
+  levier comparé aux leviers non choisis ; portions de protéines réglables
+- **v1.13** (à évaluer) : horizon eau en modèle espace-état, apports par le modèle inverse de Hall, VFC si Garmin
+  l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
   plus belle et plus pratique

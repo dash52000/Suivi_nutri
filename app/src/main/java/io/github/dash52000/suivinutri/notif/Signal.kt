@@ -15,6 +15,7 @@ import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.data.Objectif
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.labo.Cap
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.format.TextStyle
@@ -22,22 +23,23 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 /**
- * Signal de la semaine (v1.9) : une notif par semaine au maximum, à 18 h, le soir qui dérape le plus d'après
- * le journal (vendredi par défaut, pour le plan du week-end). Indépendant du rappel du soir.
+ * Notif du bilan du dimanche (v1.12, remplace le signal de la semaine de la v1.9) : une par semaine, le dimanche à
+ * 19 h. Elle annonce le bilan et le soir à surveiller dans la semaine qui vient ; elle ne lit pas le poids (le bilan
+ * se calcule à l'ouverture de l'onglet Cap).
  */
 object Signal {
 
     private const val CANAL = "signal_semaine"
     private const val ID_NOTIF = 2
-    const val HEURE = 18
+    const val HEURE = 19
 
     /** Extra posé sur l'intent : l'appli s'ouvre sur l'onglet Cap. */
     const val EXTRA_ONGLET = "onglet"
     const val EXTRA_DEPUIS_SIGNAL = "depuis_signal"
 
     fun creerCanal(context: Context) {
-        val canal = NotificationChannel(CANAL, "Signal de la semaine", NotificationManager.IMPORTANCE_DEFAULT)
-        canal.description = "Une notif par semaine au plus, le soir qui dérape le plus souvent."
+        val canal = NotificationChannel(CANAL, "Bilan du dimanche", NotificationManager.IMPORTANCE_DEFAULT)
+        canal.description = "Une notif par semaine, le dimanche soir : ton bilan est prêt."
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(canal)
     }
 
@@ -48,7 +50,7 @@ object Signal {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
 
-    /** Prochain soir qui dérape à 18 h ; la semaine suivante si le signal de cette semaine est déjà parti. */
+    /** Prochain dimanche à 19 h ; celui d'après si la notif de ce dimanche est déjà partie. */
     fun programmer(context: Context) {
         val alarmes = context.getSystemService(AlarmManager::class.java)
         val intention = intentionAlarme(context)
@@ -57,29 +59,22 @@ object Signal {
         if (!objectif.etat().signalActif) return
 
         val maintenant = ZonedDateTime.now()
-        val aujourdHui = maintenant.toLocalDate()
-        val jour = Cap.momentQuiDerape(Journal(context).toutes(), aujourdHui).jour
-        var date = aujourdHui.with(TemporalAdjusters.nextOrSame(jour))
-        var cible = date.atTime(HEURE, 0).atZone(maintenant.zone)
-        if (!cible.isAfter(maintenant) || objectif.derniereSemaineSignal() == Cap.debutSemaine(date)) {
-            date = aujourdHui.with(TemporalAdjusters.next(jour))
-            if (objectif.derniereSemaineSignal() == Cap.debutSemaine(date)) date = date.plusWeeks(1)
-            cible = date.atTime(HEURE, 0).atZone(maintenant.zone)
+        var dimanche = maintenant.toLocalDate().with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY))
+        if (!dimanche.atTime(HEURE, 0).atZone(maintenant.zone).isAfter(maintenant) || objectif.derniereSemaineSignal() == dimanche) {
+            dimanche = dimanche.plusWeeks(1)
         }
+        val cible = dimanche.atTime(HEURE, 0).atZone(maintenant.zone)
         alarmes.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cible.toInstant().toEpochMilli(), intention)
     }
 
-    private fun nomJour(d: java.time.DayOfWeek): String = d.getDisplayName(TextStyle.FULL, Locale.FRENCH)
-
-    private fun nombre(x: Double): String = String.format(Locale.FRENCH, "%.1f", x).removeSuffix(",0")
+    private fun nomJour(d: DayOfWeek): String = d.getDisplayName(TextStyle.FULL, Locale.FRENCH)
 
     fun afficher(context: Context) {
         val objectif = Objectif(context)
-        val etat = objectif.etat()
-        if (!etat.signalActif) return
+        if (!objectif.etat().signalActif) return
         val aujourdHui = LocalDate.now()
-        val semaine = Cap.debutSemaine(aujourdHui)
-        if (objectif.derniereSemaineSignal() == semaine) {
+        val dimanche = Cap.debutSemaine(aujourdHui)
+        if (objectif.derniereSemaineSignal() == dimanche) {
             Usage.log(context, "signal_non_envoye", "deja_envoye_cette_semaine")
             return
         }
@@ -87,25 +82,11 @@ object Signal {
             Usage.log(context, "signal_non_envoye", "notifs_refusees")
             return
         }
-        val entrees = Journal(context).toutes()
-        val moment = Cap.momentQuiDerape(entrees, aujourdHui)
-        val bieres = (0L..6L).map { semaine.plusDays(it) }.filter { !it.isAfter(aujourdHui) }
-            .mapNotNull { Cap.bieresEq33(entrees[it]) }.sum()
-        val budget = objectif.budgetCourant()
-        val levier = etat.leviers[semaine]
-
-        val titre = nomJour(aujourdHui.dayOfWeek).replaceFirstChar { it.uppercase() } + " soir"
-        val texte = buildString {
-            when {
-                !moment.parDefaut && moment.jour == aujourdHui.dayOfWeek ->
-                    append("D'habitude, ça dérape : ${moment.derapages} ${nomJour(moment.jour)}s sur ${moment.soirs}.")
-                aujourdHui.dayOfWeek == java.time.DayOfWeek.FRIDAY ->
-                    append("Le week-end arrive : 30 s pour ton plan.")
-                else -> append("Point de la semaine.")
-            }
-            if (levier != null) append(" Levier : ${levier.lowercase()}.")
-            append(" Bières : ${nombre(bieres)} / $budget.")
-        }
+        val moment = Cap.momentQuiDerape(Journal(context).toutes(), aujourdHui)
+        val titre = "Ton bilan du dimanche"
+        val texte = "Effort de la semaine, balance, ce qu'on a appris et les propositions à valider. Soir à surveiller : " +
+            nomJour(moment.jour) + if (moment.parDefaut) " (par défaut, pour le plan du week-end)." else
+            " (${moment.derapages} sur ${moment.soirs} ces 8 dernières semaines)."
 
         val ouvrir = PendingIntent.getActivity(
             context, 11,
@@ -127,11 +108,8 @@ object Signal {
             .build()
         try {
             NotificationManagerCompat.from(context).notify(ID_NOTIF, notif)
-            objectif.noterSignal(semaine)
-            Usage.log(
-                context, "signal_envoye",
-                "jour=${aujourdHui.dayOfWeek};par_defaut=${moment.parDefaut};derapages=${moment.derapages}/${moment.soirs}",
-            )
+            objectif.noterSignal(dimanche)
+            Usage.log(context, "bilan_notif_envoyee", "dimanche=$dimanche;soir_a_risque=${moment.jour};par_defaut=${moment.parDefaut}")
         } catch (_: SecurityException) {
             // Notifs refusées entre-temps : rien à faire.
         }

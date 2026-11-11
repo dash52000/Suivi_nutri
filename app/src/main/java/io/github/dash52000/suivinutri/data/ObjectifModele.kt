@@ -56,9 +56,15 @@ data class PlanWeekEnd(
     }
 }
 
+/** Protéines par portion déclarée, en grammes (v1.12 : réglables). */
+data class Portions(val whey: Double = 25.0, val oeuf: Double = 6.0, val viande: Double = 25.0)
+
+/** Réponse à une proposition de budget du bilan du dimanche (v1.12) : −1 ou +1, acceptée ou non. */
+data class DecisionBudget(val ecart: Int, val acceptee: Boolean)
+
 /** Tout ce que l'utilisateur a réglé ou choisi pour l'objectif de perte (v1.9). */
 data class EtatObjectif(
-    /** Date de départ ; les semaines comptent à partir du lundi de cette date. */
+    /** Date de départ ; les semaines comptent à partir du dimanche de cette date (v1.11). */
     val debut: LocalDate,
     /** Couloir de perte, en kg par semaine (négatif = perte). */
     val couloirBas: Double = COULOIR_BAS,
@@ -69,8 +75,19 @@ data class EtatObjectif(
     val leviers: Map<LocalDate, String> = emptyMap(),
     /** Plans du week-end, par vendredi. */
     val plans: Map<LocalDate, PlanWeekEnd> = emptyMap(),
+    /** Notif du bilan du dimanche (v1.12 ; avant : signal de la semaine). */
     val signalActif: Boolean = true,
+    /** Réponses aux propositions de budget, par semaine (dimanche à partir duquel elles valent). */
+    val decisionsBudget: Map<LocalDate, DecisionBudget> = emptyMap(),
+    /** Leviers proposés quand le levier de la semaine a été choisi : servent de témoins (v1.12). */
+    val propositionsLevier: Map<LocalDate, List<String>> = emptyMap(),
+    val portions: Portions = Portions(),
 ) {
+    /** Budget en vigueur la semaine qui commence le dimanche [semaine] : départ + propositions acceptées, entre 0 et le départ. */
+    fun budget(semaine: LocalDate): Int =
+        decisionsBudget.filter { (d, c) -> c.acceptee && !d.isAfter(semaine) }.toSortedMap().values
+            .fold(budgetInitial) { b, c -> (b + c.ecart).coerceIn(0, budgetInitial) }
+
     companion object {
         const val COULOIR_BAS = -0.40
         const val COULOIR_HAUT = -0.25

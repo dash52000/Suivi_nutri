@@ -21,13 +21,40 @@ class Objectif(context: Context) {
         leviers = leviersDepuisJson(JSONObject(prefs.getString(LEVIERS, "{}") ?: "{}")),
         plans = plansDepuisJson(JSONObject(prefs.getString(PLANS, "{}") ?: "{}")),
         signalActif = prefs.getBoolean(SIGNAL, true),
+        decisionsBudget = decisionsDepuisJson(JSONObject(prefs.getString(DECISIONS, "{}") ?: "{}")),
+        propositionsLevier = propositionsDepuisJson(JSONObject(prefs.getString(PROPOSITIONS, "{}") ?: "{}")),
+        portions = portionsDepuisJson(JSONObject(prefs.getString(PORTIONS, "{}") ?: "{}")),
     )
 
-    /** [semaine] : dimanche qui ouvre la semaine. [libelle] null : retire le levier de la semaine. */
-    fun choisirLevier(semaine: LocalDate, libelle: String?) {
-        val leviers = etat().leviers.toMutableMap()
-        if (libelle == null) leviers.remove(semaine) else leviers[semaine] = libelle
-        prefs.edit().putString(LEVIERS, leviersVersJson(leviers).toString()).apply()
+    /**
+     * [semaine] : dimanche qui ouvre la semaine. [libelle] null : retire le levier de la semaine. [proposes] : les
+     * leviers proposés à ce moment-là ; les non choisis servent de témoins (v1.12).
+     */
+    fun choisirLevier(semaine: LocalDate, libelle: String?, proposes: List<String> = emptyList()) {
+        val e = etat()
+        val leviers = e.leviers.toMutableMap()
+        val propositions = e.propositionsLevier.toMutableMap()
+        if (libelle == null) {
+            leviers.remove(semaine)
+            propositions.remove(semaine)
+        } else {
+            leviers[semaine] = libelle
+            propositions[semaine] = proposes
+        }
+        prefs.edit()
+            .putString(LEVIERS, leviersVersJson(leviers).toString())
+            .putString(PROPOSITIONS, propositionsVersJson(propositions).toString())
+            .apply()
+    }
+
+    /** Réponse à la proposition de budget du bilan du dimanche [semaine] (v1.12). */
+    fun deciderBudget(semaine: LocalDate, ecart: Int, acceptee: Boolean) {
+        val decisions = etat().decisionsBudget + (semaine to DecisionBudget(ecart, acceptee))
+        prefs.edit().putString(DECISIONS, decisionsVersJson(decisions).toString()).apply()
+    }
+
+    fun reglerPortions(p: Portions) {
+        prefs.edit().putString(PORTIONS, portionsVersJson(p).toString()).apply()
     }
 
     fun enregistrerPlan(plan: PlanWeekEnd) {
@@ -74,6 +101,9 @@ class Objectif(context: Context) {
             .put("signal_actif", e.signalActif)
             .put("leviers", leviersVersJson(e.leviers))
             .put("plans", plansVersJson(e.plans))
+            .put("decisions_budget", decisionsVersJson(e.decisionsBudget))
+            .put("propositions_levier", propositionsVersJson(e.propositionsLevier))
+            .put("portions", portionsVersJson(e.portions))
     }
 
     /** Restaure une sauvegarde : leviers et plans fusionnés, la sauvegarde l'emporte pour un même jour. */
@@ -81,9 +111,15 @@ class Objectif(context: Context) {
         val e = etat()
         val leviers = e.leviers + (json.optJSONObject("leviers")?.let { leviersDepuisJson(it) } ?: emptyMap())
         val plans = e.plans + (json.optJSONObject("plans")?.let { plansDepuisJson(it) } ?: emptyMap())
+        val decisions = e.decisionsBudget + (json.optJSONObject("decisions_budget")?.let { decisionsDepuisJson(it) } ?: emptyMap())
+        val propositions = e.propositionsLevier +
+            (json.optJSONObject("propositions_levier")?.let { propositionsDepuisJson(it) } ?: emptyMap())
         val edit = prefs.edit()
             .putString(LEVIERS, leviersVersJson(leviers).toString())
             .putString(PLANS, plansVersJson(plans).toString())
+            .putString(DECISIONS, decisionsVersJson(decisions).toString())
+            .putString(PROPOSITIONS, propositionsVersJson(propositions).toString())
+        json.optJSONObject("portions")?.let { edit.putString(PORTIONS, it.toString()) }
         json.optString("debut", "").takeIf { it.isNotEmpty() }?.let { edit.putString(DEBUT, it) }
         if (json.has("budget_initial")) edit.putInt(BUDGET, json.getInt("budget_initial"))
         if (json.has("signal_actif")) edit.putBoolean(SIGNAL, json.getBoolean("signal_actif"))
@@ -135,6 +171,42 @@ class Objectif(context: Context) {
             }.getOrNull()
         }.toMap()
 
+    private fun decisionsVersJson(d: Map<LocalDate, DecisionBudget>): JSONObject {
+        val o = JSONObject()
+        d.toSortedMap().forEach { (k, v) -> o.put(k.toString(), JSONObject().put("ecart", v.ecart).put("acceptee", v.acceptee)) }
+        return o
+    }
+
+    private fun decisionsDepuisJson(o: JSONObject): Map<LocalDate, DecisionBudget> =
+        o.keys().asSequence().mapNotNull { k ->
+            runCatching {
+                val v = o.getJSONObject(k)
+                LocalDate.parse(k) to DecisionBudget(v.getInt("ecart"), v.getBoolean("acceptee"))
+            }.getOrNull()
+        }.toMap()
+
+    private fun propositionsVersJson(p: Map<LocalDate, List<String>>): JSONObject {
+        val o = JSONObject()
+        p.toSortedMap().forEach { (k, v) -> o.put(k.toString(), org.json.JSONArray(v)) }
+        return o
+    }
+
+    private fun propositionsDepuisJson(o: JSONObject): Map<LocalDate, List<String>> =
+        o.keys().asSequence().mapNotNull { k ->
+            runCatching {
+                val a = o.getJSONArray(k)
+                LocalDate.parse(k) to (0 until a.length()).map { a.getString(it) }
+            }.getOrNull()
+        }.toMap()
+
+    private fun portionsVersJson(p: Portions): JSONObject =
+        JSONObject().put("whey", p.whey).put("oeuf", p.oeuf).put("viande", p.viande)
+
+    private fun portionsDepuisJson(o: JSONObject): Portions {
+        val d = Portions()
+        return Portions(o.optDouble("whey", d.whey), o.optDouble("oeuf", d.oeuf), o.optDouble("viande", d.viande))
+    }
+
     companion object {
         private const val DEBUT = "debut"
         private const val BUDGET = "budget_initial"
@@ -143,5 +215,8 @@ class Objectif(context: Context) {
         private const val PLANS = "plans"
         private const val SIGNAL = "signal_actif"
         private const val SIGNAL_SEMAINE = "signal_semaine"
+        private const val DECISIONS = "decisions_budget"
+        private const val PROPOSITIONS = "propositions_levier"
+        private const val PORTIONS = "portions"
     }
 }

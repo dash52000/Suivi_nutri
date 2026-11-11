@@ -130,7 +130,7 @@ object TableAnalyse {
                 cellules += j?.nbSeances?.toString() ?: "NA"
                 cellules += j?.pasTotal?.toString() ?: "NA"
                 cellules += j?.pasHorsSport?.toString() ?: "NA"
-                cellules += nombre(Labo.proteinesG(e), 0)
+                cellules += nombre(Labo.proteinesG(e, objectif?.portions ?: io.github.dash52000.suivinutri.data.Portions()), 0)
                 cellules.joinToString(",")
             }
             .toList()

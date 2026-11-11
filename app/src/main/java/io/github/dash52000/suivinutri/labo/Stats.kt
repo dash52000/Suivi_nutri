@@ -262,4 +262,32 @@ object Stats {
         }
         return Array(k) { i -> DoubleArray(k) { j -> a[i][j + k] } }
     }
+
+    // ---------- Tirages pour les lois a posteriori (v1.12) ----------
+
+    /** Tirage d'une loi gamma de forme [forme] et d'échelle 1 (Marsaglia et Tsang, 2000). */
+    fun tirageGamma(alea: java.util.Random, forme: Double): Double {
+        if (forme < 1.0) return tirageGamma(alea, forme + 1.0) * alea.nextDouble().pow(1.0 / forme)
+        val d = forme - 1.0 / 3
+        val c = 1.0 / sqrt(9 * d)
+        while (true) {
+            var x: Double
+            var v: Double
+            do {
+                x = alea.nextGaussian()
+                v = 1 + c * x
+            } while (v <= 0)
+            v = v * v * v
+            val u = alea.nextDouble()
+            if (u < 1 - 0.0331 * x * x * x * x) return d * v
+            if (ln(u) < 0.5 * x * x + d * (1 - v + ln(v))) return d * v
+        }
+    }
+
+    /** Tirage d'une loi bêta(a, b). */
+    fun tirageBeta(alea: java.util.Random, a: Double, b: Double): Double {
+        val x = tirageGamma(alea, a)
+        val y = tirageGamma(alea, b)
+        return x / (x + y)
+    }
 }

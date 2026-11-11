@@ -63,7 +63,7 @@ data class SemaineCap(
     val mesure: Mesure?,
     val nbPesees: Int,
     val verdict: Verdict,
-    /** Budget bière de la semaine (équivalent 33 cl) : figé au budget de départ en v1.11. */
+    /** Budget bière de la semaine (équivalent 33 cl) : départ + propositions acceptées (v1.12). */
     val budget: Int,
     /** Bières bues, en équivalent 33 cl ; null si l'alcool n'a été renseigné aucun jour. */
     val bieres: Double?,
@@ -245,6 +245,28 @@ object Cap {
             resultat += budget
         }
         return resultat
+    }
+
+    /**
+     * Proposition de budget pour la semaine qui commence le dimanche [semaine] (v1.12) : −1 après 2 verdicts
+     * « au-dessus » de suite, +1 après 2 verdicts dans le couloir ou plus vite (sans dépasser le départ), null sinon.
+     * Seules comptent les semaines finies depuis la dernière réponse ; rien si la semaine a déjà sa réponse.
+     */
+    fun propositionBudget(semaines: List<SemaineCap>, etat: EtatObjectif, semaine: LocalDate): Int? {
+        if (etat.decisionsBudget.containsKey(semaine)) return null
+        val derniere = etat.decisionsBudget.keys.filter { it.isBefore(semaine) }.maxOrNull()
+        val verdicts = semaines
+            .filter { !it.enCours && !it.debut.plusDays(7).isAfter(semaine) && (derniere == null || !it.debut.isBefore(derniere)) }
+            .sortedBy { it.debut }
+            .map { it.verdict }
+        if (verdicts.size < 2) return null
+        val deux = verdicts.takeLast(2)
+        val budget = etat.budget(semaine)
+        return when {
+            deux.all { it == Verdict.AU_DESSUS } && budget > 0 -> -1
+            deux.all { it == Verdict.DANS_LE_COULOIR || it == Verdict.PLUS_VITE } && budget < etat.budgetInitial -> 1
+            else -> null
+        }
     }
 
     /** Première semaine (indice dans [verdicts]) où la règle proposerait une bière de moins, null sinon. */
@@ -458,7 +480,7 @@ object Cap {
             val levier = etat.leviers[s]
             val pas = dates.mapNotNull { pasRetenus(parDate[it], aujourdHui) }
             val joursCible = if (cible == null) 0 else pas.count { it >= cible }
-            val proteines = dates.mapNotNull { Labo.proteinesG(entrees[it]) }
+            val proteines = dates.mapNotNull { Labo.proteinesG(entrees[it], etat.portions) }
             semaines += SemaineCap(
                 debut = s,
                 nbJours = nb,
@@ -469,7 +491,7 @@ object Cap {
                     // Rodage : un verdict lisible n'est pas encore jugé ; « pas lisible » reste « pas lisible ».
                     if (ChronoUnit.WEEKS.between(semaineDepart, s) < SEMAINES_RODAGE && v != Verdict.PAS_LISIBLE) Verdict.RODAGE else v
                 },
-                budget = etat.budgetInitial,
+                budget = etat.budget(s),
                 bieres = if (bieres.isEmpty()) null else bieres.sum(),
                 joursAlcool = bieres.size,
                 levier = levier,
@@ -503,7 +525,7 @@ object Cap {
             penteDepuisDebut = depuis?.pente,
             effortDepuisDebut = depuis?.effort,
             semaines = semaines,
-            budgetCourant = etat.budgetInitial,
+            budgetCourant = etat.budget(semaineCourante),
             propositions = propositions(entrees, aujourdHui, reflexes, autres = listOfNotNull(cible?.let { c ->
                 val p = (0 until JOURS_PROPOSITIONS).mapNotNull { pasRetenus(parDate[aujourdHui.minusDays(it)], aujourdHui) }
                 if (p.isEmpty()) null else Triple(LEVIER_PAS, p.count { it >= c }.toDouble() / p.size, p.size)
