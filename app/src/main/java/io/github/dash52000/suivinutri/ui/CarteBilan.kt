@@ -50,6 +50,7 @@ internal fun SectionBilan(
     semaineDepart: LocalDate,
     aujourdHui: LocalDate,
     onVu: (LocalDate) -> Unit,
+    onErreur: (String) -> Unit,
     onDecisionBudget: (dimanche: LocalDate, ecart: Int, acceptee: Boolean) -> Unit,
     onChoisirLevier: (dimanche: LocalDate, libelle: String, proposes: List<String>) -> Unit,
 ) {
@@ -66,11 +67,15 @@ internal fun SectionBilan(
     }
     var dimanche by remember { mutableStateOf(courant) }
     var bilan by remember { mutableStateOf<ResultatBilan?>(null) }
+    var erreur by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(jours, etat, dimanche) {
         bilan = null
-        bilan = withContext(Dispatchers.Default) {
-            runCatching { BilanDimanche.calculer(jours, dimanche, etat, reflexes, enPause) }.getOrNull()
+        erreur = null
+        val r = withContext(Dispatchers.Default) {
+            runCatching { BilanDimanche.calculer(jours, dimanche, etat, reflexes, enPause) }
         }
+        // Une erreur de calcul s'affiche et part dans le journal d'usage, au lieu d'un chargement sans fin.
+        r.onSuccess { bilan = it }.onFailure { e -> erreur = e.message ?: e.javaClass.simpleName; onErreur(erreur!!) }
         onVu(dimanche)
     }
 
@@ -87,7 +92,9 @@ internal fun SectionBilan(
             }
             val b = bilan
             if (b == null) {
-                CircularProgressIndicator()
+                erreur?.let {
+                    Text("Bilan impossible à calculer : $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                } ?: CircularProgressIndicator()
                 return@Column
             }
             ContenuBilan(b, etat, modifiable = b.dimanche == courant, onDecisionBudget, onChoisirLevier)

@@ -151,6 +151,7 @@ fun EcranCap(
             semaineDepart = resultat.semaineDepart,
             aujourdHui = aujourdHui,
             onVu = { dim -> Usage.log(context, "bilan_vu", "dimanche=$dim") },
+            onErreur = { msg -> Usage.log(context, "bilan_erreur", msg) },
             onDecisionBudget = { dim, ecart, acceptee ->
                 objectif.deciderBudget(dim, ecart, acceptee)
                 Usage.log(context, "budget_decision", "dimanche=$dim;ecart=$ecart;acceptee=$acceptee")

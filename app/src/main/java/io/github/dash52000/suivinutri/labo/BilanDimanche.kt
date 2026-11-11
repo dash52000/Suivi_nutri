@@ -98,8 +98,11 @@ data class ResultatBilan(
  */
 object BilanDimanche {
 
-    /** Une pesée « sort du lot » à partir d'un demi-kilo d'écart à la tendance. */
-    const val SEUIL_JOUR = 0.5
+    /**
+     * Une pesée « sort du lot » à partir de 0,8 kg d'écart à la tendance. L'écart brut fluctue de ±0,56 kg (analyse R
+     * du 10/11/2026) : à 0,5 kg, 37 % des jours sortiraient par pur bruit ; à 0,8 kg, environ 15 %, un jour par semaine.
+     */
+    const val SEUIL_JOUR = 0.8
 
     /** Face-à-face déclaré / mesuré : toutes les 4 semaines, à partir de la 8e (avant, la tendance rattrape le départ). */
     const val FACE_A_FACE_TOUTES = 4
