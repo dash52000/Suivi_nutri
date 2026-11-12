@@ -224,18 +224,12 @@ private fun ContenuBilan(
             Ligne("Rien de nouveau au niveau « probable » ou « solide » cette semaine. Les pistes sont dans le Labo.")
         }
         b.appris.forEach { c ->
-            val r = c.resultat
-            val sens = if (c.inverse) "augmente" else "réduit"
+            val l = c.lien
             Ligne(
-                if (c.apres > c.avant) "${r.libelle} ${sens} le ${r.issue} : ${c.apres.libelle} (${c.avant.libelle} la semaine dernière)."
-                else "${r.libelle} ${sens} le ${r.issue} : redescendu à ${c.apres.libelle}."
+                if (c.apres > c.avant) "${l.phrase} : ${c.apres.libelle} (${c.avant.libelle} la semaine dernière)."
+                else "${l.phrase} : redescendu à ${c.apres.libelle}."
             )
-            if (r.p1 != null && r.p0 != null && r.probReduit != null) {
-                Texte(
-                    "${pourcent(r.p1)} des soirs contre ${pourcent(r.p0)}, à lieu de dîner égal · probabilité : " +
-                        pourcent(if (c.inverse) 1 - r.probReduit else r.probReduit)
-                )
-            }
+            Texte("${l.chiffre} · probabilité : ${pourcent(l.prob)}")
         }
     }
 

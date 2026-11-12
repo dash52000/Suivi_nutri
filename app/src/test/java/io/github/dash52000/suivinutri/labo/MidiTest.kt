@@ -5,6 +5,7 @@ import io.github.dash52000.suivinutri.data.EntreeJour
 import io.github.dash52000.suivinutri.data.Questionnaire
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 
@@ -36,7 +37,9 @@ class MidiTest {
         assertEquals(1.0, effet.p1!!, 0.0)
         assertEquals(0.0, effet.p0!!, 0.0)
         assertNotNull(effet.ecart)
-        assertEquals(1.0, effet.ecart!!.estimation, 1e-9)
+        // v1.14 : écart a posteriori, tiré vers zéro par l'a priori sceptique.
+        assertTrue(effet.ecart!!.estimation > 0.5)
+        assertEquals(Niveau.SOLIDE, effet.niveau)
     }
 
     @Test
@@ -52,6 +55,7 @@ class MidiTest {
         val effet = Labo.analyser(jours, d0.plusDays(20)).croises.first { it.issue == "petit creux l'après-midi" }
         assertEquals(10, effet.n1)
         assertEquals(10, effet.n0)
-        assertEquals(1.0, effet.ecart!!.estimation, 1e-9)
+        assertTrue(effet.ecart!!.estimation > 0.5)
+        assertEquals(Niveau.SOLIDE, effet.niveau)
     }
 }

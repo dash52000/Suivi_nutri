@@ -76,6 +76,12 @@ Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.
 
 ## Labo
 
+Depuis la v1.14, l'écran se lit en quatre temps : **Ce qu'on sait** (les liens probables ou solides, toutes
+sources confondues), puis trois questions : qu'est-ce qui fait bouger la balance le lendemain (effets de la veille,
+semaine type, d'où vient l'écart du jour), les réflexes marchent-ils et qu'est-ce qui pousse au rab (calendrier,
+mécanismes, effets croisés, soirs de la semaine), où en est la graisse (poids, graisse et maigre, apports). Les
+explications sont repliées derrière « ? ».
+
 - **Tendance du poids** : filtre et lisseur de Kalman (niveau local + pente, pas journalier).
   Bruit de pesée (0,6 kg)² le matin, (1,2 kg)² l'après-midi ; bruit du niveau (0,05 kg/j)²,
   de la pente (0,005 kg/j par jour)². Pesée écartée si elle tombe à plus de 4 écarts-types de
@@ -119,12 +125,24 @@ Philosophie, état et feuille de route détaillés : doc de projet `suivi-nutri.
   sur toutes les expositions du soir J à la fois : rab et dessert sur 3 niveaux (0 ; 0,5 ; 1), alcool
   en unités, beaux-parents, longue sortie (endurance ≥ 1 h 15). Une exposition n'entre que si elle a ≥ 5 jours exposés et ≥ 5 non exposés parmi
   les jours complets ; ≥ 15 jours complets. Erreurs-types de Newey-West (retard 2 jours, jours voisins seulement).
-- **Effets croisés** : différence de proportions, intervalle d'Agresti-Caffo. Ceux qui reposent sur une question
-  en pause ne sont ni affichés ni comptés dans la correction (v1.11).
-  Nuit courte et alcool la veille → rab / dessert ; tupp remplis la veille → tupp mangé le midi ;
-  séance le midi → petit creux ; petit creux → rab le soir.
-- **Tests multiples** : correction de Benjamini-Hochberg sur l'ensemble des effets ; un effet n'est
-  présenté comme net (en couleur) que si q < 5 %.
+  Depuis la v1.14, a posteriori avec un a priori sceptique N(0, τ²), τ = 0,15 kg pour un oui franc et 0,03 kg par
+  unité d'alcool (loi de Student), et niveau de preuve « ça fait monter ». Simulation (`SimulationLendemainTest`) :
+  sans effet, « probable » dans 3 à 12 % des cas, « solide » dans 0 à 5 % ; +0,1 kg par unité d'alcool : « probable »
+  68 % à 6 semaines, 93 % à 12. Avec τ = 0,1 kg par unité, l'alcool sortait « probable » 17 % du temps sans effet.
+- **Effets croisés** (v1.14 : même moteur bêta-binomial que les réflexes, à lieu de dîner égal pour le rab et le
+  dessert) : nuit courte et alcool la veille → rab / dessert ; jour de séance → rab / dessert (compensation après
+  le sport) ; tupp remplis la veille → tupp mangé le midi ; séance le midi → petit creux ; petit creux → rab.
+  Simulation : séance → rab sans effet, alors que séances et beaux-parents tombent le dimanche : « probable » 2 à 8 %.
+  Ceux qui reposent sur une question en pause ne sont pas affichés.
+- **Annonce** (v1.14, plus de Benjamini-Hochberg) : un lien est annoncé (Ce qu'on sait, bilan du dimanche) s'il est
+  probable dans le sens attendu, ou solide dans le sens inverse. Une quarantaine de sens sont suivis : un
+  « probable » peut être un faux positif ; vrai, il finit solide, sinon il redescend.
+- **Semaine type** (v1.14, 12 dernières semaines) : écart moyen de la pesée à la tendance par jour (IC de Student,
+  ≥ 3 pesées), et part des soirs avec rab, alcool, dessert, beaux-parents par jour.
+- **D'où vient l'écart du jour** (v1.14, 4 dernières semaines, ≥ 14 pesées) : somme des carrés de l'écart découpée
+  dans l'ordre veille (effets a posteriori × expositions, centrés) → eau du jour non expliquée → reste. Simulation :
+  sans effet, la veille « explique » 4 à 7 % ; avec effets, environ 15 % ; l'eau environ un tiers.
+- **Graisse et maigre dans le temps** (v1.14) : tendances corrigées de l'eau en variation sur 90 jours, bandes à 95 %.
 
 Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
 contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
@@ -182,6 +200,10 @@ boisson saisie.
   levier comparé aux leviers non choisis ; portions de protéines réglables
 - **v1.13** : apports du Labo avec ρ de Hall au lieu des 7 700 kcal/kg et semaines du dimanche (simulation :
   biais +43 → 0 kcal/j, couverture de l'IC 95 % 88 → 95 %) ; calcul du Cap hors du fil principal, erreur affichée
+- **v1.14** : Labo réorganisé (Ce qu'on sait, trois questions, explications repliées) ; une seule échelle de
+  preuve (piste / probable / solide) pour le lendemain et les effets croisés, sans Benjamini-Hochberg ; semaine type,
+  d'où vient l'écart du jour, graisse et maigre dans le temps, compensation après le sport ; le bilan du dimanche
+  annonce aussi les liens du lendemain et les effets croisés
 - **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
   l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,

@@ -14,6 +14,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,6 +23,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
@@ -35,7 +37,11 @@ import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
+import io.github.dash52000.suivinutri.labo.JourType
 import io.github.dash52000.suivinutri.labo.Labo
+import io.github.dash52000.suivinutri.labo.Liens
+import io.github.dash52000.suivinutri.labo.SemaineType
+import io.github.dash52000.suivinutri.labo.SoirType
 import io.github.dash52000.suivinutri.labo.Niveau
 import io.github.dash52000.suivinutri.labo.ResultatMecanisme
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
@@ -43,6 +49,7 @@ import io.github.dash52000.suivinutri.labo.PointPoids
 import io.github.dash52000.suivinutri.labo.Stats
 import io.github.dash52000.suivinutri.labo.Qualite
 import io.github.dash52000.suivinutri.labo.ResultatLabo
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -107,12 +114,21 @@ fun EcranLabo(health: HealthData, journal: Journal, config: Configuration, modif
     }
 }
 
+/** Titre de partie, avec son explication repliée derrière « ? » (v1.14). */
 @Composable
-private fun Section(titre: String, intro: String?, contenu: @Composable () -> Unit) {
+private fun Section(titre: String, aide: String?, petit: Boolean = false, contenu: @Composable () -> Unit) {
+    var ouvert by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(titre, style = MaterialTheme.typography.titleMedium)
-        if (intro != null) {
-            Text(intro, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                titre,
+                style = if (petit) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (aide != null) TextButton(onClick = { ouvert = !ouvert }) { Text(if (ouvert) "×" else "?") }
+        }
+        if (aide != null && ouvert) {
+            Text(aide, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         contenu()
     }
@@ -125,38 +141,121 @@ private fun Ligne(texte: String) {
     }
 }
 
+private val AIDE_PREUVE =
+    "Chaque lien a une probabilité, calculée avec un a priori sceptique (il faut des données pour s'éloigner de « pas " +
+        "d'effet ») : piste à 70 %, probable à 90 %, solide à 97,5 %, avec assez de jours de chaque côté. Une piste se " +
+        "trompe une fois sur trois. Un effet dans le sens inattendu (un réflexe qui augmente le rab…) n'est annoncé " +
+        "que s'il est solide."
+
 @Composable
 private fun ContenuLabo(etat: EtatLabo.Pret) {
     val r = etat.resultat
+    val masquerPesee = Affichage.masquerPesee(LocalContext.current)
 
-    Section("Tes réflexes, 4 dernières semaines", null) {
+    // ---------- Ce qu'on sait ----------
+    Section(
+        "Ce qu'on sait",
+        "Les liens probables ou solides, toutes questions confondues, les plus sûrs d'abord. Une quarantaine de liens " +
+            "sont suivis : de temps en temps, un « probable » est un faux positif. S'il est vrai, il finit solide ; " +
+            "sinon il redescend, et le bilan du dimanche le dit. $AIDE_PREUVE",
+    ) {
+        val sus = Liens.annonces(r)
+        if (sus.isEmpty()) {
+            val pistes = Liens.pistes(r)
+            Ligne(
+                "Rien de probable pour l'instant" +
+                    (if (pistes > 0) " : $pistes piste${if (pistes > 1) "s" else ""} en cours, à suivre plus bas." else ".")
+            )
+        } else {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    sus.forEach { l ->
+                        Column {
+                            Text(l.phrase, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                "${l.chiffre} · ${l.niveau.libelle} (${pourcent(l.prob)})",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---------- 1. La balance le lendemain ----------
+    Section(
+        "Qu'est-ce qui fait bouger ta balance le lendemain ?",
+        "La pesée du matin comparée à la tendance, expliquée par tout ce qui s'est passé la veille à la fois : chaque " +
+            "effet est estimé à reste égal. Rab et dessert : effet d'un oui franc (« un peu » et « petite part » comptent " +
+            "pour moitié) ; alcool : effet par unité. C'est surtout de l'eau (sel, glycogène, alcool) : ce qui compte, " +
+            "c'est que l'écart retombe en 2 ou 3 jours. $AIDE_PREUVE",
+    ) {
+        ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
+        GrapheDecroissance(r.lendemain)
+    }
+    if (!masquerPesee) {
+        Section(
+            "Ta semaine type sur la balance",
+            "Écart moyen de la pesée à la tendance selon le jour, sur les 12 dernières semaines, avec un intervalle à 95 %. " +
+                "La pesée du lundi reflète le dimanche. C'est une description, pas un lien : elle dit quand la balance " +
+                "monte, le bloc du dessus dit pourquoi.",
+            petit = true,
+        ) {
+            val jours = r.balanceParJour.sortedBy { it.jour.value }
+            if (jours.all { it.ecart == null }) {
+                Ligne("Il faut au moins ${SemaineType.MIN_PAR_JOUR} pesées par jour de la semaine.")
+            } else {
+                ForestPlot(jours.map { itemJour(it) }, "kg", 1)
+            }
+        }
+        Section(
+            "D'où vient l'écart du jour",
+            "Sur les 4 dernières semaines, l'écart des pesées à la tendance découpé dans l'ordre : d'abord ce qu'explique " +
+                "la veille (effets du bloc du dessus), puis l'eau du jour mesurée par la balance et pas expliquée par la " +
+                "veille, puis le reste (bruit de la balance, ce que l'appli ne voit pas). En simulation, sans aucun " +
+                "effet réel, la veille « explique » environ 5 % par hasard : sous 10 %, elle n'explique rien de net.",
+            petit = true,
+        ) {
+            val o = r.origineEcart
+            if (o == null) Ligne("Il faut au moins ${Labo.MIN_JOURS_ORIGINE} pesées sur les 4 dernières semaines.")
+            else BarreOrigine(o)
+        }
+    }
+
+    // ---------- 2. Les réflexes et ce qui pousse au rab ----------
+    Section(
+        "Tes réflexes marchent-ils, et qu'est-ce qui pousse au rab ?",
+        "Chaque réflexe testé sur ce pour quoi il a été pensé, le soir même : fréquence du rab selon qu'il a été tenu ou " +
+            "non, à lieu de dîner égal. Puis le contexte (nuit, alcool la veille, séance…) face à ce qui suit. Pas de " +
+            "bruit de pesée ici : c'est là que les résultats arrivent en premier. $AIDE_PREUVE",
+    ) {
         if (etat.calendrier.isEmpty()) {
             Ligne("Le calendrier se remplira avec tes réponses du soir.")
         } else {
             CalendrierLong(etat.calendrier, etat.dates28)
         }
-    }
-
-    Section(
-        "Tes réflexes font-ils leur effet ?",
-        "Chaque réflexe testé sur ce pour quoi il a été pensé, le soir même : fréquence du rab selon que le réflexe " +
-            "a été tenu ou non, à lieu de dîner égal (écart en points). La probabilité dit à quel point l'appli est sûre " +
-            "que le réflexe réduit le rab : piste à 70 %, probable à 90 %, solide à 97,5 % avec assez de soirs. Une " +
-            "piste se trompe une fois sur trois, c'est normal. Pas de bruit de pesée ici : c'est le premier endroit où " +
-            "des résultats apparaîtront.",
-    ) {
         ForestPlot(r.mecanismes.map { itemMecanisme(it) }, "pts", 0)
+        ForestPlot(r.croises.filter { !it.mecanisme }.map { itemCroise(it) }, "pts", 0)
+    }
+    Section(
+        "Tes soirs",
+        "Sur les 12 dernières semaines, parmi les soirs renseignés : part des soirs avec rab (« un peu » compte), avec " +
+            "alcool, avec dessert, chez les beaux-parents. Au moins ${SemaineType.MIN_PAR_JOUR} soirs par case.",
+        petit = true,
+    ) {
+        TableauSoirs(r.soirsParJour)
     }
 
-    val masquerPesee = Affichage.masquerPesee(LocalContext.current)
+    // ---------- 3. La graisse ----------
     Section(
-        "Poids",
+        "Où en est ta graisse ?",
         (if (masquerPesee) "La tendance, sans les pesées du jour. "
         else "Des points gris pour les pesées (vides : écartées), un trait pour la tendance. Quand la balance " +
             "mesure l'eau, un point en couleur donne la pesée corrigée de l'eau du jour (repas salé, glycogène), " +
             "relié à la pesée brute : la longueur du trait, c'est l'eau. ") +
-            "La bande donne l'incertitude de la tendance à 95 % : elle s'élargit quand tu ne te pèses pas. " +
-            "La tendance suit les pesées corrigées quand il y en a.",
+            "La bande donne l'incertitude de la tendance à 95 % : elle s'élargit quand tu ne te pèses pas.",
     ) {
         GraphePoids(r.poids, masquerPesee)
         val derniere = r.poids.lastOrNull { it.ecart != null }
@@ -166,17 +265,25 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        val c = r.composition
-        if (c != null && !masquerPesee) {
-            Text(
-                "Composition (tendances de la balance, corrigées de l'eau) : masse grasse ${nombre(c.graisseKg, 1)} ± " +
-                    "${nombre(Stats.Z975 * c.graisseSe, 1)} kg (${nombre(c.graissePct, 1)} %), masse maigre " +
-                    "${nombre(c.maigreKg, 1)} ± ${nombre(Stats.Z975 * c.maigreSe, 1)} kg.",
-                style = MaterialTheme.typography.bodySmall,
-            )
+    }
+    if (!masquerPesee && r.serieComposition.size >= 2) {
+        Section(
+            "Graisse et maigre",
+            "Tendances de la balance corrigées de l'eau, en variation depuis le début du graphe, avec leur bande à 95 %. " +
+                "Le « maigre » de la balance comprend l'eau, le glycogène et les organes : ce n'est pas du muscle, et sa " +
+                "variation n'est lisible qu'au bout de 10 à 12 semaines.",
+            petit = true,
+        ) {
+            GrapheComposition(r.serieComposition)
+            r.composition?.let { c ->
+                Text(
+                    "Aujourd'hui : graisse ${nombre(c.graisseKg, 1)} ± ${nombre(Stats.Z975 * c.graisseSe, 1)} kg " +
+                        "(${nombre(c.graissePct, 1)} %), maigre ${nombre(c.maigreKg, 1)} ± ${nombre(Stats.Z975 * c.maigreSe, 1)} kg.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         }
     }
-
     Section(
         "Apports estimés",
         "Dépense moyenne + énergie stockée ou déstockée. Avec la balance : masse grasse × 9 440 kcal/kg + masse " +
@@ -186,8 +293,9 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
             "Les jours sans montre (ni sommeil ni séance, moins de 2 000 kcal) sont écartés de la dépense. " +
             "Une barre par semaine complète (dimanche matin → dimanche matin, comme le Cap), la dernière en creux pour les 7 derniers " +
             "jours (pesée d'il y a 7 jours → pesée de ce matin). " +
-            "Le niveau absolu est sans doute surestimé, car les montres surestiment souvent la dépense : " +
+            "Le niveau absolu dépend de la précision de la montre, qu'on ne peut pas vérifier : " +
             "fie-toi aux variations, pas au chiffre brut.",
+        petit = true,
     ) {
         val aujourdHui = etat.dates28.last()
         // Semaines complètes finies avant aujourd'hui (le dimanche, la dernière est déjà les 7 derniers jours).
@@ -218,50 +326,31 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
         }
     }
 
-    Section(
-        "Le lendemain",
-        "Écart de la pesée à la tendance, expliqué par toutes les expositions de la veille à la fois : chaque " +
-            "effet est estimé à expositions égales par ailleurs. Rab et dessert : effet d'un oui franc (« un peu » " +
-            "et « petite part » comptent pour moitié) ; alcool : effet par unité. Le poids du lendemain bouge surtout avec l'eau, " +
-            "le sel et le glycogène ; ce qui compte, c'est que l'écart retombe en 2 ou 3 jours.",
-    ) {
-        ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
-        GrapheDecroissance(r.lendemain)
-    }
-
-    Section("Effets croisés", "Écart de fréquence, en points de pourcentage.") {
-        ForestPlot(r.croises.filter { !it.mecanisme }.map { itemCroise(it) }, "pts", 0)
-    }
-
-    Text(
-        "En couleur : les effets qui résistent à la correction pour tests multiples (Benjamini-Hochberg, " +
-            "q < 5 %). Sur une quinzaine d'intervalles à 95 %, environ un exclurait zéro par pur hasard.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-
     Section("Qualité des données", null) {
         LigneQualite(r.qualite)
     }
 }
 
-private fun net(q: Double?): Boolean = q != null && q < Labo.SEUIL_Q
-
-private fun verdict(q: Double?): String = when {
-    q == null -> ""
-    net(q) -> " · retenu (q = ${nombre(q, 3)})"
-    else -> " · pas d'effet net (q = ${nombre(q, 2)})"
+/** Texte du niveau de preuve : sens attendu, sinon sens inverse s'il atteint au moins une piste. */
+private fun texteNiveau(prob: Double, niveau: Niveau, niveauInverse: Niveau, sens: String, sensInverse: String): String = when {
+    niveau != Niveau.AUCUN -> "probabilité que $sens : ${pourcent(prob)} (${niveau.libelle})"
+    niveauInverse != Niveau.AUCUN -> "probabilité que $sensInverse : ${pourcent(1 - prob)} (${niveauInverse.libelle})"
+    else -> "probabilité que $sens : ${pourcent(prob)} (pas encore de piste)"
 }
 
 private fun itemLendemain(e: EffetLendemain): ItemForest {
-    val j1 = e.j1
-    val detail = if (j1 == null) {
-        "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s), avec une pesée le lendemain " +
-            "(il en faut ${Labo.MIN_GROUPE} de chaque et ${Labo.MIN_JOURS_REGRESSION} jours complets)."
-    } else {
-        "${signe(j1.estimation, 1, "kg")} le lendemain (${ic(j1, 1, "kg")}) · ${e.n1} jours contre ${e.n0}" + verdict(e.q)
+    val post = e.post1
+    val prob = e.probMonte
+    if (post == null || prob == null) {
+        return ItemForest(
+            e.libelle, null,
+            "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s), avec une pesée le lendemain " +
+                "(il en faut ${Labo.MIN_GROUPE} de chaque et ${Labo.MIN_JOURS_REGRESSION} jours complets).",
+        )
     }
-    return ItemForest(e.libelle, j1, detail, net(e.q))
+    val detail = "${signe(post.estimation, 1, "kg")} le lendemain · ${e.n1} jours contre ${e.n0} · " +
+        texteNiveau(prob, e.niveau, e.niveauInverse, "ça fasse monter", "ça fasse baisser")
+    return ItemForest(e.libelle, post, detail, Liens.annonce(e.niveau, false) || Liens.annonce(e.niveauInverse, true))
 }
 
 private fun itemMecanisme(m: ResultatMecanisme): ItemForest {
@@ -272,33 +361,69 @@ private fun itemMecanisme(m: ResultatMecanisme): ItemForest {
             libelle, null,
             "Pas encore assez de soirs à comparer : ${m.n1} tenu(s), ${m.n0} pas tenu(s), " +
                 "à lieu de dîner égal (${Niveau.PISTE.minParGroupe} de chaque au minimum).",
-            false,
         )
     }
-    val niveau = when {
-        m.niveau != Niveau.AUCUN -> m.niveau.libelle
-        m.niveauInverse != Niveau.AUCUN -> "${m.niveauInverse.libelle} d'un effet inverse"
-        else -> "pas encore de piste"
-    }
-    val detail = "${pourcent(m.p1)} des soirs contre ${pourcent(m.p0)} quand il n'est pas tenu · probabilité que " +
-        "ça réduise le ${m.issue} : ${pourcent(m.probReduit)} ($niveau)"
-    return ItemForest(libelle, ecart.fois(100.0), detail, m.niveau >= Niveau.PROBABLE)
+    val detail = "${pourcent(m.p1)} des soirs contre ${pourcent(m.p0)} quand il n'est pas tenu · " +
+        texteNiveau(m.probReduit, m.niveau, m.niveauInverse, "ça réduise le ${m.issue}", "ça l'augmente")
+    return ItemForest(libelle, ecart.fois(100.0), detail, Liens.annonce(m.niveau, false) || Liens.annonce(m.niveauInverse, true))
 }
 
 private fun itemCroise(e: EffetCroise): ItemForest {
     val ecart = e.ecart
     val libelle = "${e.exposition} : ${e.issue}"
-    if (ecart == null || e.p1 == null || e.p0 == null) {
+    val prob = e.probAugmente
+    if (ecart == null || prob == null || e.p1 == null || e.p0 == null) {
         return ItemForest(
             libelle, null,
-            "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s) (${Labo.MIN_GROUPE} de chaque).",
-            false,
+            "Pas encore assez de données : ${e.n1} jour(s) concerné(s), ${e.n0} autre(s) " +
+                "(${Niveau.PISTE.minParGroupe} de chaque au minimum).",
         )
     }
-    val enPoints = ecart.fois(100.0)
-    val detail = "${pourcent(e.p1)} des jours contre ${pourcent(e.p0)} ${e.reference} " +
-        "(${ic(enPoints, 0, "pts")})" + verdict(e.q)
-    return ItemForest(libelle, enPoints, detail, net(e.q))
+    val detail = "${pourcent(e.p1)} des jours contre ${pourcent(e.p0)} ${e.reference} · " +
+        texteNiveau(prob, e.niveau, e.niveauInverse, "ça l'augmente", "ça le réduise")
+    return ItemForest(libelle, ecart.fois(100.0), detail, Liens.annonce(e.niveau, false) || Liens.annonce(e.niveauInverse, true))
+}
+
+private val nomsJours = mapOf(
+    DayOfWeek.MONDAY to "lundi", DayOfWeek.TUESDAY to "mardi", DayOfWeek.WEDNESDAY to "mercredi",
+    DayOfWeek.THURSDAY to "jeudi", DayOfWeek.FRIDAY to "vendredi", DayOfWeek.SATURDAY to "samedi",
+    DayOfWeek.SUNDAY to "dimanche",
+)
+
+private fun itemJour(j: JourType): ItemForest {
+    val veille = nomsJours.getValue(j.jour.minus(1))
+    val libelle = "Pesée du ${nomsJours.getValue(j.jour)} (après le $veille)"
+    val e = j.ecart ?: return ItemForest(libelle, null, "${j.n} pesée(s) : il en faut ${SemaineType.MIN_PAR_JOUR}.")
+    return ItemForest(
+        libelle, e, "${signe(e.estimation, 1, "kg")} en moyenne (${ic(e, 1, "kg")}) · ${j.n} pesées",
+        net = e.bas > 0 || e.haut < 0,
+    )
+}
+
+@Composable
+private fun TableauSoirs(soirs: List<SoirType>) {
+    // La semaine commence le dimanche, comme le Cap.
+    val ordre = listOf(DayOfWeek.SUNDAY) + DayOfWeek.values().filter { it != DayOfWeek.SUNDAY }
+    val parJour = soirs.associateBy { it.jour }
+    fun case(x: Double?) = x?.let { pourcent(it) } ?: "—"
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth()) {
+                listOf("", "Rab", "Alcool", "Dessert", "B.-parents").forEachIndexed { i, t ->
+                    Text(t, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(if (i == 0) 1.3f else 1f))
+                }
+            }
+            ordre.forEach { d ->
+                val s = parJour[d]
+                Row(Modifier.fillMaxWidth()) {
+                    Text(nomsJours.getValue(d).replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1.3f))
+                    listOf(s?.rab, s?.alcool, s?.dessert, s?.beauxParents).forEach { v ->
+                        Text(case(v), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

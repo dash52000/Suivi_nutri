@@ -99,7 +99,11 @@ data class SemaineApports(
     val apportsEstimes: Double get() = apports.estimation
 }
 
-/** Effet d'une exposition du jour J sur l'écart du poids à la tendance, à J+1 (avec IC), J+2 et J+3. */
+/**
+ * Effet d'une exposition du jour J sur l'écart de la pesée à la tendance. [j1] (avec IC), [j2], [j3] : estimations
+ * brutes de la régression. Depuis la v1.14, l'affichage utilise l'a posteriori ([post1], [post2], [post3]) avec un
+ * a priori sceptique centré sur zéro, et un niveau de preuve comme les réflexes.
+ */
 data class EffetLendemain(
     val libelle: String,
     val n1: Int,
@@ -107,11 +111,20 @@ data class EffetLendemain(
     val j1: Intervalle?,
     val j2: Double?,
     val j3: Double?,
-    /** q-valeur de Benjamini-Hochberg, sur l'ensemble des effets du labo. */
-    val q: Double? = null,
+    val post1: Intervalle? = null,
+    val post2: Double? = null,
+    val post3: Double? = null,
+    /** Probabilité a posteriori que l'exposition fasse monter la pesée du lendemain. */
+    val probMonte: Double? = null,
+    val niveau: Niveau = Niveau.AUCUN,
+    /** Niveau d'un effet à la baisse. */
+    val niveauInverse: Niveau = Niveau.AUCUN,
 )
 
-/** Une exposition (nuit courte, alcool la veille) et sa fréquence d'issue (rab, dessert). */
+/**
+ * Une exposition (nuit courte, alcool la veille, séance) et sa fréquence d'issue (rab, dessert). Depuis la v1.14,
+ * [ecart] est l'écart a posteriori (bêta-binomial, a priori sceptique, comme les réflexes).
+ */
 data class EffetCroise(
     val exposition: String,
     val reference: String,
@@ -121,7 +134,10 @@ data class EffetCroise(
     val p1: Double?,
     val p0: Double?,
     val ecart: Intervalle?,
-    val q: Double? = null,
+    /** Probabilité a posteriori que l'exposition augmente l'issue. */
+    val probAugmente: Double? = null,
+    val niveau: Niveau = Niveau.AUCUN,
+    val niveauInverse: Niveau = Niveau.AUCUN,
     /** Test direct du mécanisme d'un réflexe, le jour même (ex. pris ton temps → rab). */
     val mecanisme: Boolean = false,
 )
@@ -157,6 +173,11 @@ data class ResultatLabo(
     val lissage: Kalman.Lissage? = null,
     /** Mécanismes des réflexes en probabilités bayésiennes, à lieu de dîner égal (v1.12). */
     val mecanismes: List<ResultatMecanisme> = emptyList(),
+    /** v1.14 : semaine type (balance et soirs), origine de l'écart du jour, graisse et maigre dans le temps. */
+    val balanceParJour: List<JourType> = emptyList(),
+    val soirsParJour: List<SoirType> = emptyList(),
+    val origineEcart: OrigineEcart? = null,
+    val serieComposition: List<PointComposition> = emptyList(),
 )
 
 object Labo {
@@ -175,8 +196,12 @@ object Labo {
     const val NUIT_COURTE_MIN = 390L
     const val LONGUE_SORTIE_MIN = 75L
 
-    /** Seuil de q-valeur (Benjamini-Hochberg) pour qu'un effet soit présenté comme net. */
-    const val SEUIL_Q = 0.05
+    /**
+     * A priori sceptique du lendemain (v1.14) : effet centré sur zéro, écart-type de 0,3 kg pour un oui franc
+     * (rab, dessert, beaux-parents, longue sortie) et 0,1 kg par unité d'alcool. Voir SimulationLendemainTest.
+     */
+    const val TAU_LENDEMAIN = 0.15
+    const val TAU_LENDEMAIN_ALCOOL = 0.03
 
     /** Régression du lendemain : au moins 15 jours complets, retard de Newey-West de 2 jours. */
     const val MIN_JOURS_REGRESSION = 15
@@ -450,21 +475,30 @@ object Labo {
         }
         val semaines = if (lis == null) emptyList() else semaines(parDate, lis, comp, aujourdHui)
         val septDerniersJours = if (lis == null) null else septDerniersJours(parDate, lis, comp, aujourdHui)
+        // Depuis la v1.14, plus de Benjamini-Hochberg : chaque lien a son niveau de preuve bayésien, comme les
+        // réflexes, et seuls « probable » et « solide » sont annoncés.
         val lendemain = lendemain(tries, parDate, lis)
         val croises = croises(tries, parDate, enPause)
-
-        // Benjamini-Hochberg sur l'ensemble des effets testés : une vingtaine d'intervalles à 95 %
-        // donneraient sinon environ un « effet » par pur hasard.
-        val pValeurs = lendemain.mapNotNull { it.j1?.p } + croises.mapNotNull { it.ecart?.p }
-        val q = Stats.benjaminiHochberg(pValeurs).iterator()
 
         return ResultatLabo(
             poids = poids,
             composition = resume,
             semaines = semaines.sortedByDescending { it.debut },
             septDerniersJours = septDerniersJours,
-            lendemain = lendemain.map { e -> if (e.j1?.p != null) e.copy(q = q.next()) else e },
-            croises = croises.map { e -> if (e.ecart?.p != null) e.copy(q = q.next()) else e },
+            lendemain = lendemain,
+            croises = croises,
+            balanceParJour = SemaineType.balance(poids, aujourdHui),
+            soirsParJour = SemaineType.soirs(tries, aujourdHui),
+            origineEcart = origineEcart(poids, lendemain, parDate, aujourdHui),
+            serieComposition = comp?.let { c ->
+                poids.mapNotNull { p ->
+                    val i = c.graisse.index(p.date) ?: return@mapNotNull null
+                    val j = c.maigre.index(p.date) ?: return@mapNotNull null
+                    PointComposition(
+                        p.date, c.graisse.niveau(i), sqrt(c.graisse.varNiveau(i)), c.maigre.niveau(j), sqrt(c.maigre.varNiveau(j)),
+                    )
+                }
+            } ?: emptyList(),
             qualite = qualite(tries, parDate, aujourdHui),
             lissage = lis,
             mecanismes = Mecanismes.evaluer(tries.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap(), aujourdHui, enPause),
@@ -589,6 +623,67 @@ object Labo {
         return apres - avant
     }
 
+    /** Une exposition du jour J testée sur la pesée du lendemain, avec son a priori sceptique. */
+    private class Exposition(val libelle: String, val tau: Double, val valeur: (JourLabo) -> Double?)
+
+    private fun binaire(b: Boolean?): Double? = b?.let { if (it) 1.0 else 0.0 }
+
+    /**
+     * Expositions graduées : rab et dessert sur 3 niveaux (« un peu », « petite part » = moitié), alcool en unités ;
+     * le coefficient est l'effet d'un oui franc, ou d'une unité d'alcool.
+     */
+    private val EXPOSITIONS_LENDEMAIN = listOf(
+        Exposition("Soir avec rab", TAU_LENDEMAIN) { j ->
+            when (j.entree?.rep("resservi")) { "oui" -> 1.0; "un_peu" -> 0.5; "non" -> 0.0; else -> null }
+        },
+        Exposition("Dessert pris", TAU_LENDEMAIN) { j ->
+            when (j.entree?.rep("dessert")) { "normale" -> 1.0; "petite" -> 0.5; "non", "tupp" -> 0.0; else -> null }
+        },
+        Exposition("Alcool, par unité", TAU_LENDEMAIN_ALCOOL) { j -> unites(j.entree) },
+        Exposition("Dîner chez les beaux-parents", TAU_LENDEMAIN) { j -> binaire(beauxParents(j.entree)) },
+        Exposition("Longue sortie (1 h 15 et plus)", TAU_LENDEMAIN) { j -> binaire(j.longueSortie) },
+    )
+
+    /**
+     * D'où vient l'écart de la pesée à la tendance (v1.14), sur les [jours] derniers jours : somme des carrés
+     * découpée dans l'ordre. D'abord la veille (effets a posteriori du lendemain × expositions de la veille, effet
+     * total, eau comprise), puis l'eau du jour mesurée par la balance et pas expliquée par la veille, puis le reste
+     * (bruit de la balance, ce que l'appli ne voit pas). Null sous [MIN_JOURS_ORIGINE] pesées.
+     */
+    fun origineEcart(
+        poids: List<PointPoids>,
+        lendemain: List<EffetLendemain>,
+        parDate: Map<LocalDate, JourLabo>,
+        aujourdHui: LocalDate,
+        jours: Long = 28,
+    ): OrigineEcart? {
+        val effets = EXPOSITIONS_LENDEMAIN.map { x -> x to lendemain.firstOrNull { it.libelle == x.libelle }?.post1?.estimation }
+        // (écart, effet de la veille, part de l'eau) par pesée. La tendance passe au-dessus des jours « sans rien »
+        // (elle moyenne aussi les jours chargés) : effet de la veille et eau sont centrés sur la période.
+        val l = poids.filter { it.date.isAfter(aujourdHui.minusDays(jours)) && !it.date.isAfter(aujourdHui) }.mapNotNull { p ->
+            val e = p.ecart ?: return@mapNotNull null
+            val veille = parDate[p.date.minusDays(1)]
+            val f = if (veille == null) 0.0 else effets.sumOf { (x, b) -> (b ?: 0.0) * (x.valeur(veille) ?: 0.0) }
+            Triple(e, f, p.partEau ?: 0.0)
+        }
+        val n = l.size
+        if (n < MIN_JOURS_ORIGINE) return null
+        val fm = l.sumOf { it.second } / n
+        val wm = l.sumOf { it.third } / n
+        var ss0 = 0.0; var ss1 = 0.0; var ss2 = 0.0
+        l.forEach { (e, f0, w0) ->
+            val f = f0 - fm; val w = w0 - wm
+            ss0 += e * e; ss1 += (e - f) * (e - f); ss2 += (e - f - w) * (e - f - w)
+        }
+        if (ss0 <= 0) return null
+        var veille = ((ss0 - ss1) / ss0).coerceAtLeast(0.0)
+        var eau = ((ss1 - ss2) / ss0).coerceAtLeast(0.0)
+        if (veille + eau > 1) { val t = veille + eau; veille /= t; eau /= t }
+        return OrigineEcart(n, sqrt(ss0 / n), veille, eau, 1 - veille - eau)
+    }
+
+    const val MIN_JOURS_ORIGINE = 14
+
     /**
      * Effet lendemain par régression jointe : l'écart de la pesée de J+k à la tendance lissée est expliqué
      * par toutes les expositions du jour J à la fois (rab, dessert, alcool, beaux-parents, longue sortie).
@@ -601,20 +696,8 @@ object Labo {
         parDate: Map<LocalDate, JourLabo>,
         lis: Kalman.Lissage?,
     ): List<EffetLendemain> {
-        // Expositions graduées : rab et dessert sur 3 niveaux (« un peu », « petite part » = moitié),
-        // alcool en unités ; le coefficient est l'effet d'un oui franc, ou d'une unité d'alcool.
-        fun binaire(b: Boolean?): Double? = b?.let { if (it) 1.0 else 0.0 }
-        val expositions: List<Pair<String, (JourLabo) -> Double?>> = listOf(
-            "Soir avec rab" to { j: JourLabo ->
-                when (j.entree?.rep("resservi")) { "oui" -> 1.0; "un_peu" -> 0.5; "non" -> 0.0; else -> null }
-            },
-            "Dessert pris" to { j: JourLabo ->
-                when (j.entree?.rep("dessert")) { "normale" -> 1.0; "petite" -> 0.5; "non", "tupp" -> 0.0; else -> null }
-            },
-            "Alcool, par unité" to { j: JourLabo -> unites(j.entree) },
-            "Dîner chez les beaux-parents" to { j: JourLabo -> binaire(beauxParents(j.entree)) },
-            "Longue sortie (1 h 15 et plus)" to { j: JourLabo -> binaire(j.longueSortie) },
-        )
+        val tau = EXPOSITIONS_LENDEMAIN.map { it.tau }
+        val expositions = EXPOSITIONS_LENDEMAIN.map { it.libelle to it.valeur }
         if (lis == null) return expositions.map { (l, _) -> EffetLendemain(l, 0, 0, null, null, null) }
 
         fun residu(d: LocalDate): Double? {
@@ -668,6 +751,7 @@ object Labo {
         return expositions.mapIndexed { v, (libelle, _) ->
             val a = retenues.indexOf(v)
             val (oui, non) = if (a >= 0 && m1 != null) compte(completes, v) else compte(l1.filter { it.x[v] != null }, v)
+            val p1 = if (a >= 0 && m1 != null) posterieur(m1, a + 1, tau[v]) else null
             EffetLendemain(
                 libelle = libelle,
                 n1 = oui,
@@ -675,8 +759,35 @@ object Labo {
                 j1 = if (a >= 0) m1?.intervalle(a + 1) else null,
                 j2 = if (a >= 0) m2?.coef?.get(a + 1) else null,
                 j3 = if (a >= 0) m3?.coef?.get(a + 1) else null,
+                post1 = p1?.intervalle,
+                post2 = if (a >= 0 && m2 != null) posterieur(m2, a + 1, tau[v])?.intervalle?.estimation else null,
+                post3 = if (a >= 0 && m3 != null) posterieur(m3, a + 1, tau[v])?.intervalle?.estimation else null,
+                probMonte = p1?.probPositif,
+                niveau = p1?.let { Mecanismes.niveau(it.probPositif, oui, non) } ?: Niveau.AUCUN,
+                niveauInverse = p1?.let { Mecanismes.niveau(1 - it.probPositif, oui, non) } ?: Niveau.AUCUN,
             )
         }
+    }
+
+    /** A posteriori d'un coefficient : estimation et intervalle crédible à 95 %, probabilité qu'il soit positif. */
+    class Posterieur(val intervalle: Intervalle, val probPositif: Double)
+
+    /**
+     * A priori normal N(0, [tau]²) combiné à l'estimation de la régression (erreur-type de Newey-West) : moyenne
+     * tirée vers zéro d'un facteur τ² / (τ² + se²). Probabilité et intervalle avec la loi de Student à [ResultatOls.ddl]
+     * degrés de liberté, prudente sur peu de jours.
+     */
+    fun posterieur(m: ResultatOls, j: Int, tau: Double): Posterieur? {
+        val se = m.se[j]
+        if (!(se > 0)) return null
+        val k = tau * tau / (tau * tau + se * se)
+        val moyenne = m.coef[j] * k
+        val sd = sqrt(k) * se
+        val t = moyenne / sd
+        val queue = Stats.pStudent(kotlin.math.abs(t), m.ddl.toDouble()) / 2
+        val prob = if (t >= 0) 1 - queue else queue
+        val q = Stats.t975(m.ddl.toDouble()) * sd
+        return Posterieur(Intervalle(moyenne, moyenne - q, moyenne + q), prob)
     }
 
     /** Une exposition d'un jour et l'issue mesurée le même jour. */
@@ -711,6 +822,9 @@ object Labo {
         }
 
         val croisements = listOf(
+            // v1.14 : compensation après le sport.
+            Croisement("Un jour de séance", "un jour sans", "rab le soir", { j -> j.nbSeances?.let { it > 0 } }, rabSoir, ids = setOf("resservi")),
+            Croisement("Un jour de séance", "un jour sans", "dessert pris", { j -> j.nbSeances?.let { it > 0 } }, dessertSoir, ids = setOf("dessert")),
             // Les mécanismes des réflexes (pris ton temps, boîtes, plaisir → rab) sont en probabilités bayésiennes
             // depuis la v1.12 : voir Mecanismes.
             Croisement("Après une nuit de moins de 6 h 30", "après une nuit plus longue", "rab le soir", nuitCourte, rabSoir, ids = setOf("resservi")),
@@ -721,23 +835,34 @@ object Labo {
             Croisement("Les jours de séance le midi", "les autres jours", "petit creux l'après-midi", { j -> j.seanceMidi }, creux, ids = setOf("midi_creux")),
             Croisement("Après un petit creux l'après-midi", "sans creux", "rab le soir", creux, rabSoir, ids = setOf("midi_creux", "resservi")),
         ).filter { c -> c.ids.none { it in enPause } }
+        // v1.14 : même moteur bêta-binomial que les réflexes. Les issues du soir (rab, dessert) sont comparées à lieu
+        // de dîner égal ; les autres (midi, creux) en une seule strate.
+        val issuesDuSoir = setOf("rab le soir", "dessert pris")
         return croisements.map { c ->
-            var s1 = 0; var n1 = 0; var s0 = 0; var n0 = 0
+            val strates = mutableMapOf<String, IntArray>()
             tries.forEach { j ->
                 val e = c.expose(j) ?: return@forEach
                 val r = c.mesure(j) ?: return@forEach
-                if (e) { n1++; if (r) s1++ } else { n0++; if (r) s0++ }
+                val strate = if (c.issue in issuesDuSoir) j.entree?.rep("diner") ?: "?" else "tous"
+                val n = strates.getOrPut(strate) { IntArray(4) }
+                if (e) { n[1]++; if (r) n[0]++ } else { n[3]++; if (r) n[2]++ }
             }
-            val assez = n1 >= MIN_GROUPE && n0 >= MIN_GROUPE
+            val n1 = strates.values.sumOf { it[1] }
+            val n0 = strates.values.sumOf { it[3] }
+            val b = Mecanismes.ecartBayes(strates.values)
+            val probAugmente = b?.let { 1 - it.probNegatif }
             EffetCroise(
                 exposition = c.exposition,
                 reference = c.reference,
                 issue = c.issue,
                 n1 = n1,
                 n0 = n0,
-                p1 = if (n1 > 0) s1.toDouble() / n1 else null,
-                p0 = if (n0 > 0) s0.toDouble() / n0 else null,
-                ecart = if (assez) Stats.differenceProportions(s1, n1, s0, n0) else null,
+                p1 = if (n1 > 0) strates.values.sumOf { it[0] }.toDouble() / n1 else null,
+                p0 = if (n0 > 0) strates.values.sumOf { it[2] }.toDouble() / n0 else null,
+                ecart = b?.ecart,
+                probAugmente = probAugmente,
+                niveau = if (b != null) Mecanismes.niveau(probAugmente!!, b.m1, b.m0) else Niveau.AUCUN,
+                niveauInverse = if (b != null) Mecanismes.niveau(b.probNegatif, b.m1, b.m0) else Niveau.AUCUN,
                 mecanisme = c.mecanisme,
             )
         }

@@ -136,6 +136,7 @@ object Stats {
     /**
      * Correction de Benjamini-Hochberg : q-valeurs dans l'ordre des p-valeurs fournies.
      * Un effet est retenu si q < 5 % : on accepte en moyenne 5 % de fausses découvertes parmi les effets retenus.
+     * Plus utilisée par le Labo depuis la v1.14 (niveaux de preuve bayésiens) ; gardée pour l'analyse.
      */
     fun benjaminiHochberg(p: List<Double>): List<Double> {
         val m = p.size

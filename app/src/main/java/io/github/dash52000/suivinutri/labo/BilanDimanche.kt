@@ -55,7 +55,10 @@ data class BilanLevier(
 )
 
 /** Un lien qui a changé de niveau de preuve cette semaine (probable ou solide). */
-data class ChangementLien(val libelle: String, val avant: Niveau, val apres: Niveau, val inverse: Boolean, val resultat: ResultatMecanisme)
+/** Un lien qui a changé de niveau depuis le bilan d'avant (v1.14 : réflexes, lendemain et effets croisés). */
+data class ChangementLien(val lien: Lien, val avant: Niveau) {
+    val apres: Niveau get() = lien.niveau
+}
 
 data class ResultatBilan(
     /** Dimanche du bilan : clôture de la semaine écoulée, début de la semaine qui vient. */
@@ -80,7 +83,10 @@ data class ResultatBilan(
     /** 5. Effort déclaré de la semaine, et face-à-face toutes les 4 semaines (à partir de la 8e). */
     val effortDeclare: EffortDeclare?,
     val faceAFace: FaceAFace?,
-    /** 6. Ce qu'on a appris : les liens passés à probable ou solide (ou qui en sont redescendus). */
+    /**
+     * 6. Ce qu'on a appris : les liens qui deviennent annoncés (probable dans le sens attendu, solide dans le sens
+     * inverse) ou qui ne le sont plus, depuis le dimanche d'avant.
+     */
     val appris: List<ChangementLien>,
     val mecanismes: List<ResultatMecanisme>,
     /** 7. À valider pour la semaine qui vient. */
@@ -257,7 +263,11 @@ object BilanDimanche {
         val connus = jours.filter { !it.date.isAfter(dimanche) }
         val parDate = connus.associateBy { it.date }
         val entrees = connus.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap()
-        val labo = Labo.analyser(connus, dimanche, enPause = enPause)
+        // Le Labo du bilan lit les réponses jusqu'au samedi soir : celle du dimanche, souvent remplie après 19 h,
+        // changerait le bilan après coup.
+        fun sansDimanche(js: List<JourLabo>, d: LocalDate) =
+            js.filter { !it.date.isAfter(d) }.map { if (it.date == d) it.copy(entree = null) else it }
+        val labo = Labo.analyser(sansDimanche(jours, dimanche), dimanche, enPause = enPause)
         val lis = labo.lissage
         val cap = Cap.analyser(connus, lis, etat, dimanche, reflexes)
         val semaine = cap.semaines.firstOrNull { it.debut == dimanche.minusDays(7) }
@@ -268,9 +278,12 @@ object BilanDimanche {
         val points = labo.poids.associateBy { it.date }
         val effets = labo.lendemain.associateBy { it.libelle }
         fun effet(libelle: String, x: Double = 1.0): String {
-            val e = effets[libelle]?.j1 ?: return "effet pas encore estimé"
-            val v = e.estimation * x
-            return "effet habituel ${if (v >= 0) "+" else "−"}${String.format(Locale.FRENCH, "%.1f", abs(v))} kg"
+            val e = effets[libelle] ?: return "effet pas encore estimé"
+            val p = e.post1 ?: return "effet pas encore estimé"
+            val v = p.estimation * x
+            val niveau = maxOf(e.niveau, e.niveauInverse)
+            return "effet habituel ${if (v >= 0) "+" else "−"}${String.format(Locale.FRENCH, "%.1f", abs(v))} kg, " +
+                if (niveau >= Niveau.PISTE) niveau.libelle else "pas encore de piste"
         }
         val balance = (6L downTo 0L).map { k ->
             val d = dimanche.minusDays(k)
@@ -316,18 +329,16 @@ object BilanDimanche {
             } else null
         } else null
 
-        // 6. Ce qu'on a appris : changements de niveau probable / solide depuis le dimanche d'avant.
-        val maintenant = Mecanismes.evaluer(entrees, dimanche.minusDays(1), enPause)
-        val avant = Mecanismes.evaluer(entrees, dimanche.minusDays(8), enPause).associateBy { it.libelle }
-        fun marquant(n: Niveau) = n >= Niveau.PROBABLE
-        val appris = maintenant.flatMap { r ->
-            val a = avant[r.libelle]
-            listOfNotNull(
-                ChangementLien(r.libelle, a?.niveau ?: Niveau.AUCUN, r.niveau, false, r)
-                    .takeIf { (marquant(r.niveau) || marquant(it.avant)) && it.avant != r.niveau },
-                ChangementLien(r.libelle, a?.niveauInverse ?: Niveau.AUCUN, r.niveauInverse, true, r)
-                    .takeIf { (marquant(r.niveauInverse) || marquant(it.avant)) && it.avant != r.niveauInverse },
-            )
+        // 6. Ce qu'on a appris : liens annoncés ou retirés depuis le dimanche d'avant, calculés comme ce bilan-là.
+        val maintenant = labo.mecanismes
+        val precedent = dimanche.minusDays(7)
+        val avant = Liens.tous(Labo.analyser(sansDimanche(jours, precedent), precedent, enPause = enPause))
+            .associate { it.cle to it.niveau }
+        val appris = Liens.tous(labo).mapNotNull { l ->
+            val a = avant[l.cle] ?: Niveau.AUCUN
+            ChangementLien(l, a).takeIf {
+                a != l.niveau && (Liens.annonce(l.niveau, l.inverse) || Liens.annonce(a, l.inverse))
+            }
         }
 
         // 7. Propositions.

@@ -4,7 +4,10 @@ import io.github.dash52000.suivinutri.data.EntreeJour
 import java.time.LocalDate
 import java.util.Random
 
-/** Niveau de preuve d'un lien (v1.12) : probabilité a posteriori que le réflexe réduise l'issue. */
+/**
+ * Niveau de preuve d'un lien : probabilité a posteriori que l'effet aille dans le sens attendu (v1.12 pour les
+ * réflexes, v1.14 pour le lendemain et les effets croisés). [minParGroupe] : jours ou soirs dans chaque groupe.
+ */
 enum class Niveau(val libelle: String, val seuil: Double, val minParGroupe: Int) {
     AUCUN("pas encore de piste", 0.0, 0),
     PISTE("piste", 0.70, 3),
@@ -102,12 +105,29 @@ object Mecanismes {
         val n0 = strates.values.sumOf { it[3] }
         val p1 = if (n1 > 0) strates.values.sumOf { it[0] }.toDouble() / n1 else null
         val p0 = if (n0 > 0) strates.values.sumOf { it[2] }.toDouble() / n0 else null
-        val utiles = strates.values.filter { it[1] > 0 && it[3] > 0 }
+        val b = ecartBayes(strates.values)
+            ?: return ResultatMecanisme(m.libelle, m.reflexe, m.issue, n1, n0, p1, p0, null, null, Niveau.AUCUN, Niveau.AUCUN)
+        return ResultatMecanisme(
+            m.libelle, m.reflexe, m.issue, n1, n0, p1, p0,
+            ecart = b.ecart,
+            probReduit = b.probNegatif,
+            niveau = niveau(b.probNegatif, b.m1, b.m0),
+            niveauInverse = niveau(1 - b.probNegatif, b.m1, b.m0),
+        )
+    }
+
+    /** Écart a posteriori groupe 1 − groupe 0, probabilité qu'il soit négatif, effectifs des strates comparables. */
+    class EcartBayes(val ecart: Intervalle, val probNegatif: Double, val m1: Int, val m0: Int)
+
+    /**
+     * Moteur commun (réflexes, effets croisés) : chaque strate = [succès groupe 1, n groupe 1, succès groupe 0,
+     * n groupe 0]. Null s'il n'y a pas au moins [Niveau.PISTE] cas de chaque côté dans les strates comparables.
+     */
+    fun ecartBayes(strates: Collection<IntArray>): EcartBayes? {
+        val utiles = strates.filter { it[1] > 0 && it[3] > 0 }
         val m1 = utiles.sumOf { it[1] }
         val m0 = utiles.sumOf { it[3] }
-        if (m1 < Niveau.PISTE.minParGroupe || m0 < Niveau.PISTE.minParGroupe) {
-            return ResultatMecanisme(m.libelle, m.reflexe, m.issue, n1, n0, p1, p0, null, null, Niveau.AUCUN, Niveau.AUCUN)
-        }
+        if (m1 < Niveau.PISTE.minParGroupe || m0 < Niveau.PISTE.minParGroupe) return null
         val alea = Random(GRAINE)
         val poids = utiles.map { it[1].toDouble() * it[3] / (it[1] + it[3]) }
         val total = poids.sum()
@@ -126,13 +146,7 @@ object Mecanismes {
         val tries = tirages.sorted()
         val prob = tirages.count { it < 0 }.toDouble() / TIRAGES
         fun quantile(x: Double) = tries[((TIRAGES - 1) * x).toInt()]
-        return ResultatMecanisme(
-            m.libelle, m.reflexe, m.issue, n1, n0, p1, p0,
-            ecart = Intervalle(quantile(0.5), quantile(0.025), quantile(0.975)),
-            probReduit = prob,
-            niveau = niveau(prob, m1, m0),
-            niveauInverse = niveau(1 - prob, m1, m0),
-        )
+        return EcartBayes(Intervalle(quantile(0.5), quantile(0.025), quantile(0.975)), prob, m1, m0)
     }
 
     /** Le plus haut niveau atteint : probabilité au-dessus du seuil et assez de soirs dans chaque groupe. */

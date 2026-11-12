@@ -29,6 +29,9 @@ import androidx.compose.ui.unit.dp
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.Intervalle
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
+import io.github.dash52000.suivinutri.labo.OrigineEcart
+import io.github.dash52000.suivinutri.labo.PointComposition
+import io.github.dash52000.suivinutri.labo.Stats
 import io.github.dash52000.suivinutri.labo.SemaineApports
 import java.time.LocalDate
 import kotlin.math.abs
@@ -240,13 +243,13 @@ fun CalendrierLong(lignes: List<LigneCalendrier>, dates: List<LocalDate>) {
 
 /**
  * Une ligne de forest plot : un effet et son intervalle, ou null s'il manque des données.
- * [net] : l'effet résiste à la correction pour tests multiples (affiché en couleur).
+ * [net] : le lien est annoncé (probable ou solide, v1.14), affiché en couleur.
  */
 data class ItemForest(val libelle: String, val intervalle: Intervalle?, val detail: String, val net: Boolean = false)
 
 /**
- * Point = estimation, barre = intervalle de confiance à 95 %, trait vertical = zéro.
- * En couleur : effet retenu après correction de Benjamini-Hochberg. Échelle commune à toutes les lignes.
+ * Point = estimation, barre = intervalle à 95 %, trait vertical = zéro.
+ * En couleur : lien annoncé (probable ou solide). Échelle commune à toutes les lignes.
  */
 @Composable
 fun ForestPlot(items: List<ItemForest>, unite: String, decimales: Int) {
@@ -298,13 +301,13 @@ fun ForestPlot(items: List<ItemForest>, unite: String, decimales: Int) {
 
 // ---------- Décroissance du lendemain ----------
 
-/** Écart moyen de poids à J+1, J+2, J+3 après chaque type de soir : le pic doit redescendre. */
+/** Écart moyen de poids à J+1, J+2, J+3 après chaque type de soir (a posteriori, v1.14) : le pic doit redescendre. */
 @Composable
 fun GrapheDecroissance(effets: List<EffetLendemain>) {
     val series = effets.mapNotNull { e ->
-        val j1 = e.j1?.estimation ?: return@mapNotNull null
-        val j2 = e.j2 ?: return@mapNotNull null
-        val j3 = e.j3 ?: return@mapNotNull null
+        val j1 = e.post1?.estimation ?: return@mapNotNull null
+        val j2 = e.post2 ?: return@mapNotNull null
+        val j3 = e.post3 ?: return@mapNotNull null
         e.libelle to listOf(j1, j2, j3)
     }
     if (series.isEmpty()) return
@@ -342,6 +345,103 @@ fun GrapheDecroissance(effets: List<EffetLendemain>) {
             }
             Text(signe(-etendue, 1, "kg"), style = MaterialTheme.typography.labelSmall)
             series.forEachIndexed { s, (libelle, _) -> Legende("● $libelle", couleurs[s % couleurs.size]) }
+        }
+    }
+}
+
+// ---------- D'où vient l'écart du jour (v1.14) ----------
+
+/** Une barre découpée : la veille, l'eau du jour, le reste. */
+@Composable
+fun BarreOrigine(o: OrigineEcart) {
+    val couleurs = couleursSeries()
+    val parts = listOf(
+        "La veille" to o.veille,
+        "L'eau du jour" to o.eau,
+        "Le reste (balance, non vu)" to o.reste,
+    )
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                "Écart typique de la pesée à la tendance : ± ${nombre(o.ecartTypique, 1)} kg (${o.nbJours} pesées)",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(18.dp),
+            ) {
+                var x = 0f
+                parts.forEachIndexed { i, (_, part) ->
+                    val l = (size.width * part).toFloat()
+                    drawRect(couleurs[i % couleurs.size], Offset(x, 0f), Size(l, size.height))
+                    x += l
+                }
+            }
+            parts.forEachIndexed { i, (libelle, part) ->
+                Legende("● $libelle : ${pourcent(part)}", couleurs[i % couleurs.size])
+            }
+        }
+    }
+}
+
+// ---------- Graisse et maigre dans le temps (v1.14) ----------
+
+/** Variation de la graisse et du maigre lissés depuis le premier point, avec leurs bandes à 95 %. */
+@Composable
+fun GrapheComposition(points: List<PointComposition>) {
+    if (points.size < 2) return
+    val couleurs = couleursSeries()
+    val grille = palette().grille
+    val g0 = points.first().graisse
+    val m0 = points.first().maigre
+    val valeurs = points.flatMap {
+        listOf(
+            it.graisse - g0 + Stats.Z975 * it.seGraisse, it.graisse - g0 - Stats.Z975 * it.seGraisse,
+            it.maigre - m0 + Stats.Z975 * it.seMaigre, it.maigre - m0 - Stats.Z975 * it.seMaigre,
+        )
+    }
+    val etendue = (valeurs.maxOf { abs(it) }).let { if (it == 0.0) 0.5 else it * 1.1 }
+    val debut = points.first().date
+    val jours = maxOf(1L, java.time.temporal.ChronoUnit.DAYS.between(debut, points.last().date)).toFloat()
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Legende("● Graisse ${signe(points.last().graisse - g0, 1, "kg")}", couleurs[0])
+                Legende("● Maigre ${signe(points.last().maigre - m0, 1, "kg")}", couleurs[1])
+            }
+            Text(signe(etendue, 1, "kg"), style = MaterialTheme.typography.labelSmall)
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .clipToBounds(),
+            ) {
+                fun x(d: LocalDate) = size.width * java.time.temporal.ChronoUnit.DAYS.between(debut, d) / jours
+                fun y(v: Double) = (size.height / 2 - v / etendue * size.height / 2).toFloat()
+                drawLine(grille, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), strokeWidth = 1.dp.toPx())
+                listOf(
+                    Triple(couleurs[0], { p: PointComposition -> p.graisse - g0 }, { p: PointComposition -> p.seGraisse }),
+                    Triple(couleurs[1], { p: PointComposition -> p.maigre - m0 }, { p: PointComposition -> p.seMaigre }),
+                ).forEach { (couleur, v, se) ->
+                    val bande = Path()
+                    points.forEachIndexed { i, p ->
+                        val h = y(v(p) + Stats.Z975 * se(p))
+                        if (i == 0) bande.moveTo(x(p.date), h) else bande.lineTo(x(p.date), h)
+                    }
+                    points.asReversed().forEach { p -> bande.lineTo(x(p.date), y(v(p) - Stats.Z975 * se(p))) }
+                    bande.close()
+                    drawPath(bande, couleur.copy(alpha = 0.12f))
+                    val chemin = Path()
+                    points.forEachIndexed { i, p -> if (i == 0) chemin.moveTo(x(p.date), y(v(p))) else chemin.lineTo(x(p.date), y(v(p))) }
+                    drawPath(chemin, couleur, style = Stroke(width = 2.dp.toPx()))
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("${signe(-etendue, 1, "kg")} · ${debut.format(formatCourt)}", style = MaterialTheme.typography.labelSmall)
+                Text(points.last().date.format(formatCourt), style = MaterialTheme.typography.labelSmall)
+            }
         }
     }
 }
