@@ -26,8 +26,6 @@ data class Composante(val libelle: String, val kcalJour: Double, val jours: Int)
 /** Effort déclaré : le questionnaire converti en kcal/j (négatif = moins d'apports ou plus de dépense). */
 data class EffortDeclare(val total: Double, val composantes: List<Composante>, val manquantes: List<String>)
 
-/** Face-à-face mensuel : effort déclaré contre effort mesuré par la balance, sur 4 semaines. */
-data class FaceAFace(val declare: Double, val mesure: Intervalle, val ecart: Double, val lisible: Boolean)
 
 /** Un levier proposé pour la semaine qui vient, avec ce qu'il vaut si tenu tous les soirs. */
 data class PropositionLevier(
@@ -80,9 +78,13 @@ data class ResultatBilan(
     val proteinesGkg: Double?,
     val joursProteines: Int,
     val rythmeTropRapide: Boolean,
-    /** 5. Effort déclaré de la semaine, et face-à-face toutes les 4 semaines (à partir de la 8e). */
+    /** 5. Effort déclaré de la semaine (affiché tant qu'il n'y a pas de cascade). */
     val effortDeclare: EffortDeclare?,
-    val faceAFace: FaceAFace?,
+    /**
+     * 5. La cascade depuis le départ (v1.15, à partir de 4 semaines ; remplace le face-à-face mensuel). Avant, seul
+     * [effortDeclare] de la semaine est affiché.
+     */
+    val cascade: Cascade?,
     /**
      * 6. Ce qu'on a appris : les liens qui deviennent annoncés (probable dans le sens attendu, solide dans le sens
      * inverse) ou qui ne le sont plus, depuis le dimanche d'avant.
@@ -111,8 +113,6 @@ object BilanDimanche {
     const val SEUIL_JOUR = 0.8
 
     /** Face-à-face déclaré / mesuré : toutes les 4 semaines, à partir de la 8e (avant, la tendance rattrape le départ). */
-    const val FACE_A_FACE_TOUTES = 4
-    const val FACE_A_FACE_DES = 8
 
     // ---------- Coûts en kcal (estimations de table, affichées comme telles) ----------
 
@@ -315,19 +315,11 @@ object BilanDimanche {
             return Intervalle(d, d - Stats.Z975 * se, d + Stats.Z975 * se)
         }
 
-        // 5. Effort déclaré, face-à-face.
+        // 5. Effort déclaré de la semaine ; cascade depuis le départ dès 4 semaines (v1.15).
         val reference = (1L..JOURS_REFERENCE).map { cap.semaineDepart.minusDays(it) }
         val joursSemaine = (1L..7L).map { dimanche.minusDays(it) }
         val declare = effortDeclare(parDate, joursSemaine, reference, dimanche)
-        val face = if (semainesDepuis >= FACE_A_FACE_DES && semainesDepuis % FACE_A_FACE_TOUTES == 0 && lis != null) {
-            val mesure = Cap.mesure(lis, cap.semaineDepart, dimanche.minusDays(28), 28)?.effort
-            val decl = effortDeclare(parDate, (1L..28L).map { dimanche.minusDays(it) }, reference, dimanche)
-            if (mesure != null && decl != null) {
-                val ecart = mesure.estimation - decl.total
-                val demi = mesure.haut - mesure.estimation
-                FaceAFace(decl.total, mesure, ecart, abs(ecart) > demi)
-            } else null
-        } else null
+        val cascade = lis?.let { CalculCascade.calculer(parDate, it, cap.semaineDepart, cap.semaineDepart, dimanche) }
 
         // 6. Ce qu'on a appris : liens annoncés ou retirés depuis le dimanche d'avant, calculés comme ce bilan-là.
         val maintenant = labo.mecanismes
@@ -360,7 +352,7 @@ object BilanDimanche {
             joursProteines = semaine?.joursProteines ?: 0,
             rythmeTropRapide = semaine?.verdict == Verdict.PLUS_VITE,
             effortDeclare = declare,
-            faceAFace = face,
+            cascade = cascade,
             appris = appris,
             mecanismes = maintenant,
             bilanLevier = bilanLevier(etat, dimanche.minusDays(7), entrees, parDate, reflexes, cap.ciblePas, dimanche),

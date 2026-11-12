@@ -194,8 +194,16 @@ private fun ContenuBilan(
         )
     }
 
-    // 5. Effort déclaré.
-    Bloc("Effort déclaré") {
+    // 5. Effort déclaré, puis la cascade dès 4 semaines (v1.15).
+    val cascade = b.cascade
+    if (cascade != null) Bloc("D'où vient ta perte") {
+        Ligne(resumeCascade(cascade, "Depuis le départ"))
+        lignesCascade(cascade).forEach { Texte(it) }
+        Texte(texteNonExplique(cascade))
+        if (cascade.manquantes.isNotEmpty()) {
+            Texte("Sans assez de données : ${cascade.manquantes.joinToString(", ").lowercase(Locale.FRENCH)}.")
+        }
+    } else Bloc("Effort déclaré") {
         val d = b.effortDeclare
         if (d == null) {
             Ligne("Pas assez de réponses, ou pas de référence avant le départ.")
@@ -204,17 +212,7 @@ private fun ContenuBilan(
             Texte(d.composantes.joinToString(" · ") { "${it.libelle} ${signe(it.kcalJour, 0, "")}".trimEnd() } +
                 (if (d.manquantes.isNotEmpty()) " · sans : ${d.manquantes.joinToString(", ").lowercase(Locale.FRENCH)}" else ""))
             Texte("Coûts de table (un rab ≈ 300 kcal, une part de dessert ≈ 250, alcool ≈ 70 kcal par unité, plus les glucides) : un ordre de grandeur.")
-        }
-        b.faceAFace?.let { f ->
-            Ligne(
-                "Sur 4 semaines : déclaré ${signe(f.declare, 0, "kcal/j")}, mesuré par la balance ${signe(f.mesure.estimation, 0, "kcal/j")} " +
-                    "(${ic(f.mesure, 0, "kcal/j").removePrefix("IC 95 % : ")})."
-            )
-            Texte(
-                if (!f.lisible) "Pas d'écart lisible entre les deux."
-                else if (f.ecart > 0) "Environ ${nombre(f.ecart, 0)} kcal/j que le questionnaire ne voit pas (grignotage, portions, verres non notés ?) : une question à ajouter ?"
-                else "La balance voit plus d'effort que le questionnaire : environ ${nombre(-f.ecart, 0)} kcal/j."
-            )
+            Texte("La cascade, qui compare à ce que mesure la balance, arrive 4 semaines après le départ.")
         }
     }
 

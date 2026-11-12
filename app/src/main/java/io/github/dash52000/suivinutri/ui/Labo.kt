@@ -35,6 +35,7 @@ import io.github.dash52000.suivinutri.data.Affichage
 import io.github.dash52000.suivinutri.data.Configuration
 import io.github.dash52000.suivinutri.data.Journal
 import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.labo.CalculCascade
 import io.github.dash52000.suivinutri.labo.EffetCroise
 import io.github.dash52000.suivinutri.labo.EffetLendemain
 import io.github.dash52000.suivinutri.labo.JourType
@@ -251,11 +252,33 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
     // ---------- 3. La graisse ----------
     Section(
         "Où en est ta graisse ?",
+        "La cascade (v1.15) part de l'effort mesuré par la balance depuis le départ (modèle de Hall : de combien tu " +
+            "manges moins qu'avant, moins l'activité en plus), puis le découpe : rab, dessert et alcool d'après le " +
+            "questionnaire et une table de coûts (rab 300 kcal, dessert 250, alcool 70 par unité, plus les glucides), " +
+            "l'activité d'après la montre, et le reste, non expliqué. Tout est comparé aux habitudes d'avant le départ. " +
+            "Chaque barre a sa marge à 95 % : elle vient surtout de ces habitudes, vues sur peu de jours, et ne diminue " +
+            "pas avec le temps. L'effort mesuré, lui, se précise : environ ±65 kcal/j à 3 mois, ±40 à 6. Les kg " +
+            "traduisent chaque barre par le modèle de Hall. En simulation, sans rien de caché, le non-expliqué sort " +
+            "à tort environ une fois sur dix ; des portions réduites de 150 kcal/j sans le dire ressortent une fois " +
+            "sur deux.",
+    ) {
+        val c = r.cascadeDepart
+        if (c == null) {
+            Ligne("La cascade arrive 4 semaines après le départ de l'objectif, avec assez de pesées et de réponses.")
+        } else {
+            CarteCascade(c, "Depuis le départ")
+            val m = r.cascadeMois
+            if (m != null && c.jours >= 2 * CalculCascade.JOURS_MIN) CarteCascade(m, "4 dernières semaines", graphe = false)
+        }
+    }
+    Section(
+        "Ton poids",
         (if (masquerPesee) "La tendance, sans les pesées du jour. "
         else "Des points gris pour les pesées (vides : écartées), un trait pour la tendance. Quand la balance " +
             "mesure l'eau, un point en couleur donne la pesée corrigée de l'eau du jour (repas salé, glycogène), " +
             "relié à la pesée brute : la longueur du trait, c'est l'eau. ") +
             "La bande donne l'incertitude de la tendance à 95 % : elle s'élargit quand tu ne te pèses pas.",
+        petit = true,
     ) {
         GraphePoids(r.poids, masquerPesee)
         val derniere = r.poids.lastOrNull { it.ecart != null }

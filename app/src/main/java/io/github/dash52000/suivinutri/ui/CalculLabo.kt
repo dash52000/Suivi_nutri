@@ -86,7 +86,7 @@ internal object CalculLabo {
         val perso = config.perso().map { q -> q.libelle to { e: EntreeJour -> q.score(e.reponses[q.id]) } }
         val dates28 = (27L downTo 0L).map { aujourdHui.minusDays(it) }
         val calcul = withContext(Dispatchers.Default) {
-            val resultat = Labo.analyser(jours, aujourdHui, perso, config.enPause())
+            val resultat = Labo.analyser(jours, aujourdHui, perso, config.enPause(), depart = depart)
             Calcul(
                 resultat = resultat,
                 calendrier = Labo.calendrier(entrees, dates28, Labo.reflexes + perso),

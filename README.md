@@ -143,6 +143,15 @@ explications sont repliées derrière « ? ».
   dans l'ordre veille (effets a posteriori × expositions, centrés) → eau du jour non expliquée → reste. Simulation :
   sans effet, la veille « explique » 4 à 7 % ; avec effets, environ 15 % ; l'eau environ un tiers.
 - **Graisse et maigre dans le temps** (v1.14) : tendances corrigées de l'eau en variation sur 90 jours, bandes à 95 %.
+- **Cascade** (v1.15, depuis le départ et sur les 4 dernières semaines, dès 4 semaines) : effort mesuré (Hall) découpé
+  en rab, dessert, alcool (coûts de table, par rapport aux 4 semaines avant le départ), activité (dépense de la
+  montre moins 10 kcal/j par kg d'écart de poids, par rapport aux 12 semaines avant le départ) et non expliqué.
+  Moyennes jour de semaine par jour de semaine ; marge de chaque barre = incertitude de l'habitude d'avant le départ
+  (± 10 % de l'activité pour la montre, incertitude de sa sensibilité au poids) ; marge du non-expliqué = mesuré et
+  barres réunis. Simulation (`SimulationCascadeTest`, 12 jours de questionnaire avant le départ) : total ±65 kcal/j à
+  3 mois, ±40 à 6 ; marges rab ±82, dessert ±63, alcool ±22, activité ±80 ; non expliqué ±150, « lisible » à tort
+  0 à 13 %, portions −150 kcal/j non déclarées vues une fois sur deux. Un facteur personnel sur les coûts ne
+  s'apprend pas (±0,3 au bout d'un an, mélangé au non-déclaré) : abandonné. Remplace le face-à-face du bilan.
 
 Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
 contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
@@ -204,6 +213,8 @@ boisson saisie.
   preuve (piste / probable / solide) pour le lendemain et les effets croisés, sans Benjamini-Hochberg ; semaine type,
   d'où vient l'écart du jour, graisse et maigre dans le temps, compensation après le sport ; le bilan du dimanche
   annonce aussi les liens du lendemain et les effets croisés
+- **v1.15** : la cascade (d'où vient la perte depuis le départ), dans le Labo et dans le bilan à la place du
+  face-à-face
 - **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
   l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,

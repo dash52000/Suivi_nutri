@@ -161,7 +161,11 @@ class BilanDimancheTest {
         assertEquals(25.0 + 12.0 + 50.0, b.proteinesGkg!! * (85.0 + b.ecartDepart!!), 1.0)
         // Plus de rab depuis le départ : −300 kcal/j déclarés sur le rab.
         assertEquals(-300.0, b.effortDeclare!!.composantes.first { it.libelle == "Rab" }.kcalJour, 1e-9)
-        assertNull(b.faceAFace) // 10e semaine : pas un multiple de 4
+        // v1.15 : la cascade depuis le départ remplace le face-à-face (10 semaines de données).
+        assertNotNull(b.cascade)
+        // Rab tous les soirs avant le départ, plus aucun après : −300 kcal/j, sans marge (habitude sans variation).
+        assertEquals(-300.0, b.cascade!!.barres.first { it.libelle == "Rab" }.kcalJour, 1e-9)
+        assertEquals(70, b.cascade!!.jours)
         assertNotNull(b.graisse4)
         assertEquals(3, b.budget)
         assertEquals(DayOfWeek.FRIDAY, b.soirARisque.jour)

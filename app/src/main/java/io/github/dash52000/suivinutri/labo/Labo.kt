@@ -178,6 +178,9 @@ data class ResultatLabo(
     val soirsParJour: List<SoirType> = emptyList(),
     val origineEcart: OrigineEcart? = null,
     val serieComposition: List<PointComposition> = emptyList(),
+    /** v1.15 : cascade depuis le départ de l'objectif, et sur les 4 dernières semaines. */
+    val cascadeDepart: Cascade? = null,
+    val cascadeMois: Cascade? = null,
 )
 
 object Labo {
@@ -436,6 +439,8 @@ object Labo {
         reflexesPerso: List<Pair<String, (EntreeJour) -> Double?>> = emptyList(),
         /** Questions en pause : les effets croisés qui en dépendent ne sont ni calculés ni comptés (v1.11). */
         enPause: Set<String> = emptySet(),
+        /** Dimanche de départ de l'objectif, pour la cascade (v1.15) ; sans lui, pas de cascade. */
+        depart: LocalDate? = null,
     ): ResultatLabo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
@@ -499,6 +504,10 @@ object Labo {
                     )
                 }
             } ?: emptyList(),
+            cascadeDepart = if (lis != null && depart != null) CalculCascade.calculer(parDate, lis, depart, depart, aujourdHui) else null,
+            cascadeMois = if (lis != null && depart != null) {
+                CalculCascade.calculer(parDate, lis, depart, aujourdHui.minusDays(CalculCascade.JOURS_MIN.toLong()), aujourdHui)
+            } else null,
             qualite = qualite(tries, parDate, aujourdHui),
             lissage = lis,
             mecanismes = Mecanismes.evaluer(tries.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap(), aujourdHui, enPause),
