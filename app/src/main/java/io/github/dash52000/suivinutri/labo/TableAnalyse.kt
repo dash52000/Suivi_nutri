@@ -36,6 +36,8 @@ object TableAnalyse {
         "pas_total", "pas_hors_sport",
         // v1.11 : protéines estimées (whey, œufs, viande / poisson), en grammes.
         "proteines_g",
+        // v1.16 : correction de la selle retirée de la pesée (kg ; NA pour une pesée avant la selle ou sans réponse).
+        "correction_selle_kg",
     )
 
     /** Texte libre (libellé d'un levier) : entre guillemets, guillemets doublés. */
@@ -56,7 +58,8 @@ object TableAnalyse {
         val parDate = jours.associateBy { it.date }
         val eau = Labo.lissageEau(jours, aujourdHui)
         val ecarts = Labo.ecartsEau(jours, aujourdHui, eau)
-        val lis = Labo.lissage(jours, aujourdHui, ecarts)
+        val selle = Labo.correctionsSelle(jours, Labo.modeleSelle(jours, aujourdHui, ecarts))
+        val lis = Labo.lissage(jours, aujourdHui, ecarts, selle)
 
         val avecDonnees = jours.filter {
             it.poids != null || it.kcal != null || it.sommeilMin != null || it.pasTotal != null || it.entree?.vide == false
@@ -65,7 +68,7 @@ object TableAnalyse {
             ?: return entete + "\n"
 
         val l = lis
-        val c = Labo.compartiments(jours, aujourdHui, ecarts)
+        val c = Labo.compartiments(jours, aujourdHui, ecarts, selle)
         val budgets = objectif?.let { o ->
             Cap.analyser(jours, lis, o, aujourdHui, emptyList()).semaines.associate { it.debut to it.budget }
         } ?: emptyMap()
@@ -79,7 +82,7 @@ object TableAnalyse {
                 val se = if (l != null && i != null) sqrt(l.varNiveau(i)) else null
                 val pente = if (l != null && i != null) l.pente(i) * 7 else null
                 val pj = j?.poids
-                val residu = if (pj != null && tendance != null && ecartee == false) pj - tendance else null
+                val residu = if (pj != null && tendance != null && ecartee == false) pj - (selle[d]?.kg ?: 0.0) - tendance else null
                 val e = j?.entree
                 val alcoolRepondu = e?.reponses?.get("alcool") != null
                 val cellules = mutableListOf(
@@ -131,6 +134,7 @@ object TableAnalyse {
                 cellules += j?.pasTotal?.toString() ?: "NA"
                 cellules += j?.pasHorsSport?.toString() ?: "NA"
                 cellules += nombre(Labo.proteinesG(e, objectif?.portions ?: io.github.dash52000.suivinutri.data.Portions()), 0)
+                cellules += nombre(selle[d]?.kg, 3)
                 cellules.joinToString(",")
             }
             .toList()

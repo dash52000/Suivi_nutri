@@ -14,6 +14,8 @@ data class JourBalance(
     /** Écart de la pesée à la tendance, part de l'eau du jour et reste ; null sans pesée retenue. */
     val ecart: Double?,
     val partEau: Double?,
+    /** v1.16 : correction de la selle déjà retirée de l'écart (négative pour une pesée après la selle). */
+    val selle: Double? = null,
     /** Le jour sort du lot (écart d'au moins [BilanDimanche.SEUIL_JOUR]). */
     val sortDuLot: Boolean,
     /** Expositions de la veille, avec leur effet habituel sur la pesée du lendemain quand il est estimé. */
@@ -301,7 +303,7 @@ object BilanDimanche {
                 if (e.reponses["dessert"] == "normale") causes += "dessert la veille (${effet("Dessert pris")})"
             }
             if (veille?.longueSortie == true) causes += "longue sortie la veille (${effet("Longue sortie (1 h 15 et plus)")})"
-            JourBalance(d, ecart, p?.partEau, ecart != null && abs(ecart) >= SEUIL_JOUR, causes)
+            JourBalance(d, ecart, p?.partEau, p?.selle, ecart != null && abs(ecart) >= SEUIL_JOUR, causes)
         }
 
         // 3. Graisse et maigre sur 4 semaines.

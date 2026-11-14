@@ -44,6 +44,8 @@ import io.github.dash52000.suivinutri.labo.Liens
 import io.github.dash52000.suivinutri.labo.SemaineType
 import io.github.dash52000.suivinutri.labo.SoirType
 import io.github.dash52000.suivinutri.labo.Niveau
+import io.github.dash52000.suivinutri.labo.Mecanismes
+import io.github.dash52000.suivinutri.labo.Selle
 import io.github.dash52000.suivinutri.labo.ResultatMecanisme
 import io.github.dash52000.suivinutri.labo.LigneCalendrier
 import io.github.dash52000.suivinutri.labo.PointPoids
@@ -195,6 +197,23 @@ private fun ContenuLabo(etat: EtatLabo.Pret) {
     ) {
         ForestPlot(r.lendemain.map { itemLendemain(it) }, "kg", 1)
         GrapheDecroissance(r.lendemain)
+    }
+    r.selle?.let { s ->
+        Section(
+            "Pesée et selle",
+            "Ta pesée de référence est celle d'avant la selle. Une pesée faite après est remontée de l'écart estimé " +
+                "(au départ 0,15 kg, puis calé sur tes matins), un matin sans selle corrigé de même, avant de calculer la " +
+                "tendance. Après un soir copieux (rab, dessert ou beaux-parents), la selle pèse sans doute plus : l'écart " +
+                "est estimé à part. Les niveaux de preuve partent d'un a priori sceptique, centré sur zéro. $AIDE_PREUVE",
+            petit = true,
+        ) {
+            Ligne(
+                "Correction appliquée : après la selle ${signe(-s.ecartApres(false), 2, "kg")} " +
+                    "(${signe(-s.ecartApres(true), 2, "kg")} après un soir copieux), sans selle ${signe(-s.ecartSans, 2, "kg")}. " +
+                    "Matins renseignés : ${s.nAvant} avant, ${s.nApres} après, ${s.nSans} sans selle."
+            )
+            ForestPlot(itemsSelle(s), "kg", 2)
+        }
     }
     if (!masquerPesee) {
         Section(
@@ -374,6 +393,27 @@ private fun itemLendemain(e: EffetLendemain): ItemForest {
     val detail = "${signe(post.estimation, 1, "kg")} le lendemain · ${e.n1} jours contre ${e.n0} · " +
         texteNiveau(prob, e.niveau, e.niveauInverse, "ça fasse monter", "ça fasse baisser")
     return ItemForest(e.libelle, post, detail, Liens.annonce(e.niveau, false) || Liens.annonce(e.niveauInverse, true))
+}
+
+private fun itemsSelle(s: Selle.Modele): List<ItemForest> {
+    fun item(libelle: String, c: Selle.Coef?, n1: Int, n0: Int, groupes: String, sens: String, inverse: String, probSens: (Selle.Coef) -> Double): ItemForest {
+        if (c == null || n1 < Niveau.PISTE.minParGroupe || n0 < Niveau.PISTE.minParGroupe) {
+            return ItemForest(libelle, null, "Pas encore assez de matins : $n1 contre $n0 ($groupes ; ${Niveau.PISTE.minParGroupe} de chaque au minimum).")
+        }
+        val p = probSens(c)
+        val niveau = Mecanismes.niveau(p, n1, n0)
+        val niveauInverse = Mecanismes.niveau(1 - p, n1, n0)
+        return ItemForest(
+            libelle, c.intervalle,
+            "$n1 contre $n0 · " + texteNiveau(p, niveau, niveauInverse, sens, inverse),
+            Liens.annonce(niveau, false) || Liens.annonce(niveauInverse, true),
+        )
+    }
+    return listOf(
+        item("Pesée après la selle, face à avant", s.apres, s.nApres, s.nAvant, "après / avant", "elle soit plus basse", "elle soit plus haute") { it.probNegatif },
+        item("Après un soir copieux, en plus", s.croise, s.nApresCopieux, s.nApresNormal, "après un soir copieux / normal", "la selle pèse plus", "elle pèse moins") { it.probNegatif },
+        item("Matin sans selle, face à avant", s.sans, s.nSans, s.nAvant, "sans / avant", "elle soit plus haute", "elle soit plus basse") { 1 - it.probNegatif },
+    )
 }
 
 private fun itemMecanisme(m: ResultatMecanisme): ItemForest {

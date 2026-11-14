@@ -54,6 +54,12 @@ object Questionnaire {
     /** Dans l'ordre de la journée. */
     val questions: List<Question> = listOf(
         Question("collation", "Collation ce matin ?", OUI_NON, Condition.SEANCE_MIDI, Moment.MATIN),
+        // v1.16 : la pesée du matin est corrigée de la selle (voir labo/Selle.kt). Codes lus par Selle.etat.
+        Question(
+            "selle", "Pesée de ce matin, par rapport à la selle ?",
+            options("avant" to "Avant", "apres" to "Après", "sans" to "Pas de selle ce matin"),
+            moment = Moment.MATIN,
+        ),
 
         Question(
             ID_MIDI_LIEU, "Déjeuner où ?",

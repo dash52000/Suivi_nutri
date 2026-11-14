@@ -34,7 +34,9 @@ internal fun texteEcartPesee(p: PointPoids): String? {
     val ecart = p.ecart ?: return null
     val e = auDixieme(ecart)
     val base = "écart à la tendance ${signe(e, 1, "kg")}"
-    val eau = p.partEau ?: return "$base (eau non mesurée)"
+    // v1.16 : l'écart est déjà corrigé de la selle ; on dit de combien la pesée brute l'a été.
+    val selle = p.selle?.let { s -> " (pesée corrigée de ${signe(auDixieme(-s), 1, "kg")} pour la selle)" } ?: ""
+    val eau = p.partEau ?: return "$base$selle (eau non mesurée)"
     val w = auDixieme(eau)
-    return "$base : eau ${signe(w, 1, "kg")}, reste ${signe(auDixieme(e - w), 1, "kg")}"
+    return "$base$selle : eau ${signe(w, 1, "kg")}, reste ${signe(auDixieme(e - w), 1, "kg")}"
 }

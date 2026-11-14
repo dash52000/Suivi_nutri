@@ -160,7 +160,8 @@ private fun ContenuBilan(
         else if (sortent.isEmpty()) Ligne("$lues pesée(s), toutes à moins de ${nombre(BilanDimanche.SEUIL_JOUR, 1)} kg de la tendance : rien à expliquer.")
         sortent.forEach { j ->
             val eau = j.partEau?.let { ", dont ${signe(it, 1, "kg")} d'eau" } ?: ""
-            Ligne("${jourCourt(j.date)} : ${signe(j.ecart!!, 1, "kg")}$eau")
+            val selle = j.selle?.let { " (selle déjà retirée : ${signe(-it, 1, "kg")})" } ?: ""
+            Ligne("${jourCourt(j.date)} : ${signe(j.ecart!!, 1, "kg")}$eau$selle")
             Texte(if (j.causes.isEmpty()) "Rien de noté la veille : sel, glycogène ou bruit de la balance." else j.causes.joinToString(" · "))
         }
     }

@@ -38,7 +38,8 @@ object Liens {
     fun annonce(l: Lien): Boolean = annonce(l.niveau, l.inverse)
 
     /** Tous les liens évalués, dans les deux sens. */
-    fun tous(r: ResultatLabo): List<Lien> = mecanismes(r.mecanismes) + lendemain(r.lendemain) + croises(r.croises)
+    fun tous(r: ResultatLabo): List<Lien> =
+        mecanismes(r.mecanismes) + lendemain(r.lendemain) + croises(r.croises) + (r.selle?.let { selle(it) } ?: emptyList())
 
     /** Ce qu'on sait : les liens annoncés, les plus sûrs d'abord. */
     fun annonces(r: ResultatLabo): List<Lien> = tous(r).filter { annonce(it) }.sortedByDescending { it.prob }
@@ -75,6 +76,38 @@ object Liens {
             Lien("lendemain:${e.libelle}", Lien.Famille.BALANCE, "$sujet → pesée du lendemain plus haute", chiffre, prob, e.niveau, false),
             Lien("lendemain:${e.libelle}:inverse", Lien.Famille.BALANCE, "$sujet → pesée du lendemain plus basse", chiffre, 1 - prob, e.niveauInverse, true),
         )
+    }
+
+    /**
+     * Pesée et selle (v1.16), a priori sceptique : après la selle → pesée plus basse ; après un soir copieux, la selle
+     * pèse plus (écart après / avant plus creusé) ; sans selle → pesée plus haute.
+     */
+    fun selle(m: Selle.Modele): List<Lien> {
+        val l = mutableListOf<Lien>()
+        fun paire(cle: String, phrase: String, inverse: String, c: Selle.Coef, probAttendu: Double, n1: Int, n0: Int, chiffre: String) {
+            l += Lien("selle:$cle", Lien.Famille.BALANCE, phrase, chiffre, probAttendu, Mecanismes.niveau(probAttendu, n1, n0), false)
+            l += Lien("selle:$cle:inverse", Lien.Famille.BALANCE, inverse, chiffre, 1 - probAttendu, Mecanismes.niveau(1 - probAttendu, n1, n0), true)
+        }
+        m.apres?.let { c ->
+            paire(
+                "apres", "Pesée après la selle → plus basse qu'avant", "Pesée après la selle → plus haute qu'avant",
+                c, c.probNegatif, m.nApres, m.nAvant, "${kg(c.intervalle.estimation)} (${m.nApres} matins après)",
+            )
+        }
+        m.croise?.let { c ->
+            paire(
+                "croise", "Après un soir copieux → la selle pèse plus", "Après un soir copieux → la selle pèse moins",
+                c, c.probNegatif, m.nApresCopieux, m.nApresNormal,
+                "${kg(c.intervalle.estimation)} de plus sur l'écart après / avant",
+            )
+        }
+        m.sans?.let { c ->
+            paire(
+                "sans", "Pas de selle le matin → pesée plus haute", "Pas de selle le matin → pesée plus basse",
+                c, 1 - c.probNegatif, m.nSans, m.nAvant, "${kg(c.intervalle.estimation)} (${m.nSans} matins sans)",
+            )
+        }
+        return l
     }
 
     fun croises(liste: List<EffetCroise>): List<Lien> = liste.filter { !it.mecanisme }.flatMap { c ->

@@ -153,6 +153,18 @@ explications sont repliées derrière « ? ».
   0 à 13 %, portions −150 kcal/j non déclarées vues une fois sur deux. Un facteur personnel sur les coûts ne
   s'apprend pas (±0,3 au bout d'un an, mélangé au non-déclaré) : abandonné. Remplace le face-à-face du bilan.
 
+### Pesée et selle (v1.16)
+
+Question du soir, section Matin : « Pesée de ce matin, par rapport à la selle ? » avant / après / pas de selle ce
+matin. Référence = avant (l'habitude). Une pesée après la selle, ou un matin sans selle, est corrigée avant le Kalman
+(sa variance ajoutée à celle de la pesée) ; le « maigre » aussi. Écart estimé par régression bayésienne sur les écarts à
+la tendance (deux passes), à soir copieux de la veille égal ; soir copieux = rab, dessert ou beaux-parents (déduit des
+réponses, rien à saisir). A priori pour corriger : après = N(−0,15 ; 0,10²) kg ; sans selle et effet croisé
+après × copieux : N(0 ; 0,15²) et N(0 ; 0,10²). Niveaux de preuve avec un a priori sceptique centré sur zéro.
+Labo : bloc « Pesée et selle » sous la balance du lendemain ; liens dans « Ce qu'on sait » et le bilan. Simulation
+(`SimulationSelleTest`) : avec 5 % de matins après, rien ne change (erreur de la tendance 0,135 kg avec ou sans) ;
+avec 40 %, 0,137 contre 0,160 kg ; l'effet croisé (−0,1 kg) reste illisible (3 à 10 % « probable »).
+
 Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
 contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
 
@@ -163,11 +175,12 @@ tendance et son écart-type, pente (kg/semaine), résidu, dépense, sommeil, min
 midi, longue sortie, composition (taux de graisse, masses grasse et maigre, masse maigre Health Connect,
 eau, os) et leurs tendances, toutes les réponses, nombre de boissons et unités d'alcool. Depuis la v1.7 :
 dépense retenue (`kcal_retenue`, NA les jours sans montre), tendance et écart de l'eau, poids et masse
-grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` reste pesée brute − tendance).
+grasse corrigés de l'eau (`tendance_kg` suit le poids corrigé ; `residu_kg` reste pesée brute − tendance, voir v1.16).
 Depuis la v1.9, en fin de ligne : `levier_semaine` (entre guillemets), `budget_bieres`, `bieres_eq33`,
 `plan_bieres`, `plan_repas_dehors`, `nb_seances` ; depuis la v1.10 : `pas_total`, `pas_hors_sport` (Garmin) ; depuis la v1.11 : `proteines_g`. Depuis la v1.11,
 `levier_semaine` et `budget_bieres` suivent la semaine du dimanche, et `unites_alcool` vaut NA pour « oui » sans
-boisson saisie.
+boisson saisie. Depuis la v1.16 : colonne `selle` (réponse), `correction_selle_kg` en fin de ligne (retirée de la
+pesée, NA sinon), et `residu_kg` = pesée brute − correction de la selle − tendance.
 
 ## Feuille de route
 
@@ -215,6 +228,7 @@ boisson saisie.
   annonce aussi les liens du lendemain et les effets croisés
 - **v1.15** : la cascade (d'où vient la perte depuis le départ), dans le Labo et dans le bilan à la place du
   face-à-face
+- **v1.16** : pesée et selle (question du matin, correction avant le Kalman, effet croisé avec le soir copieux)
 - **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
   l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,

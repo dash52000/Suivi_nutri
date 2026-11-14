@@ -70,9 +70,11 @@ data class PointPoids(
     val apresMidi: Boolean,
     /** Pesée corrigée de l'eau du jour (null si la balance n'a pas mesuré l'eau). brut − corrigé = part de l'eau. */
     val corrige: Double? = null,
+    /** v1.16 : correction de la selle retirée de la pesée (négative pour une pesée après la selle), null sinon. */
+    val selle: Double? = null,
 ) {
-    /** Écart de la pesée à la tendance, null sans pesée ou si elle a été écartée. */
-    val ecart: Double? get() = if (brut == null || ecartee) null else brut - tendance
+    /** Écart de la pesée (corrigée de la selle) à la tendance, null sans pesée ou si elle a été écartée. */
+    val ecart: Double? get() = if (brut == null || ecartee) null else brut - (selle ?: 0.0) - tendance
 
     /** Part de l'écart due à l'eau : 0,73 × (eau du jour − tendance de l'eau). */
     val partEau: Double? get() = if (ecart == null || corrige == null) null else brut!! - corrige
@@ -181,6 +183,8 @@ data class ResultatLabo(
     /** v1.15 : cascade depuis le départ de l'objectif, et sur les 4 dernières semaines. */
     val cascadeDepart: Cascade? = null,
     val cascadeMois: Cascade? = null,
+    /** v1.16 : pesée et selle (correction appliquée et niveaux de preuve). */
+    val selle: Selle.Modele? = null,
 )
 
 object Labo {
@@ -383,18 +387,68 @@ object Labo {
     /**
      * Lissage de Kalman de toutes les pesées, de la première jusqu'à aujourd'hui. Null sans pesée.
      * Les jours où la balance mesure l'eau, la pesée est corrigée de l'écart de l'eau à sa tendance et compte
-     * deux fois plus.
+     * deux fois plus. Depuis la v1.16, la pesée est aussi corrigée de la selle ([Selle]) : sa correction est retirée
+     * et sa variance ajoutée à celle de la pesée.
      */
     fun lissage(
         jours: List<JourLabo>,
         aujourdHui: LocalDate,
         ecarts: Map<LocalDate, Double> = ecartsEau(jours, aujourdHui),
+        corrections: Map<LocalDate, Selle.Correction> = correctionsSelle(jours, modeleSelle(jours, aujourdHui, ecarts)),
     ): Kalman.Lissage? {
         val pesees = jours.filter { it.poids != null }
         if (pesees.isEmpty()) return null
-        return lisserSerie(pesees.map { it to poidsCorrige(it, ecarts[it.date])!! }, aujourdHui, Kalman.POIDS) { j ->
-            (if (ecarts[j.date] != null) Kalman.POIDS_CORRIGE else Kalman.POIDS).variance(j.heurePesee)
+        return lisserSerie(
+            pesees.map { it to poidsCorrige(it, ecarts[it.date])!! - (corrections[it.date]?.kg ?: 0.0) },
+            aujourdHui, Kalman.POIDS,
+        ) { j ->
+            (if (ecarts[j.date] != null) Kalman.POIDS_CORRIGE else Kalman.POIDS).variance(j.heurePesee) +
+                (corrections[j.date]?.variance ?: 0.0)
         }
+    }
+
+    /**
+     * Modèle de la selle (v1.16) : écarts des pesées corrigées de l'eau à une première tendance qui ignore la selle,
+     * expliqués par la selle du matin et le soir de la veille. L'a priori seul sans pesée.
+     */
+    fun modeleSelle(
+        jours: List<JourLabo>,
+        aujourdHui: LocalDate,
+        ecarts: Map<LocalDate, Double> = ecartsEau(jours, aujourdHui),
+    ): Selle.Modele {
+        val parDate = jours.associateBy { it.date }
+        val veilles = jours.mapNotNull { Selle.copieux(it.entree) }
+        // Sans aucun matin « après » ou « sans selle », rien à estimer : l'a priori, sans relisser.
+        if (jours.none { it.poids != null && Selle.etat(it.entree).let { e -> e == Selle.Etat.APRES || e == Selle.Etat.SANS } }) {
+            return Selle.estimer(emptyList(), veilles)
+        }
+        // Deux passes : la première tendance ignore la selle (elle est tirée vers le bas par les matins « après »),
+        // la seconde part de la tendance corrigée. Simulation : biais de l'écart après / avant divisé par deux environ.
+        var corrections = emptyMap<LocalDate, Selle.Correction>()
+        var modele = Selle.A_PRIORI
+        repeat(PASSES_SELLE) {
+            val lis = lissage(jours, aujourdHui, ecarts, corrections) ?: return Selle.A_PRIORI
+            val residus = jours.mapNotNull { j ->
+                val i = lis.index(j.date) ?: return@mapNotNull null
+                if (j.poids == null || i in lis.ecartees) return@mapNotNull null
+                // Écart de la pesée brute (non corrigée de la selle) à la tendance.
+                j.date to poidsCorrige(j, ecarts[j.date])!! - lis.niveau(i)
+            }.toMap()
+            modele = Selle.estimer(Selle.lignes(residus) { parDate[it]?.entree }, veilles)
+            corrections = correctionsSelle(jours, modele)
+        }
+        return modele
+    }
+
+    private const val PASSES_SELLE = 2
+
+    /** Correction de la selle de chaque matin qui en a une (« après » ou « sans selle »). */
+    fun correctionsSelle(jours: List<JourLabo>, modele: Selle.Modele): Map<LocalDate, Selle.Correction> {
+        val parDate = jours.associateBy { it.date }
+        return jours.mapNotNull { j ->
+            if (j.poids == null) return@mapNotNull null
+            Selle.correction(modele, j.entree, parDate[j.date.minusDays(1)]?.entree)?.let { j.date to it }
+        }.toMap()
     }
 
     /**
@@ -411,16 +465,19 @@ object Labo {
         jours: List<JourLabo>,
         aujourdHui: LocalDate,
         ecarts: Map<LocalDate, Double> = ecartsEau(jours, aujourdHui),
+        corrections: Map<LocalDate, Selle.Correction> = correctionsSelle(jours, modeleSelle(jours, aujourdHui, ecarts)),
     ): Compartiments? {
         val mesures = jours.filter { it.masseGrasse != null }
         if (mesures.size < MIN_MESURES_COMPOSITION) return null
         fun corrige(j: JourLabo) = ecarts[j.date] != null
         val graisse = mesures.map { it to graisseCorrigee(it, ecarts[it.date])!! }
+        // v1.16 : la selle n'est ni de la graisse ni du muscle, mais elle compte dans le « maigre » de la balance.
+        fun selle(j: JourLabo) = corrections[j.date]?.kg ?: 0.0
         return Compartiments(
             graisse = lisserSerie(graisse, aujourdHui, Kalman.GRAISSE) { j ->
                 (if (corrige(j)) Kalman.GRAISSE_CORRIGEE else Kalman.GRAISSE).variance(j.heurePesee)
             },
-            maigre = lisserSerie(graisse.map { (j, g) -> j to j.poids!! - g }, aujourdHui, Kalman.MAIGRE) { j ->
+            maigre = lisserSerie(graisse.map { (j, g) -> j to j.poids!! - selle(j) - g }, aujourdHui, Kalman.MAIGRE) { j ->
                 (if (corrige(j)) Kalman.MAIGRE_CORRIGEE else Kalman.MAIGRE).variance(j.heurePesee)
             },
             corriges = mesures.filter { corrige(it) }.map { it.date }.toSet(),
@@ -445,7 +502,9 @@ object Labo {
         val tries = jours.sortedBy { it.date }
         val parDate = tries.associateBy { it.date }
         val ecarts = ecartsEau(tries, aujourdHui)
-        val lis = lissage(tries, aujourdHui, ecarts)
+        val selle = modeleSelle(tries, aujourdHui, ecarts)
+        val corrections = correctionsSelle(tries, selle)
+        val lis = lissage(tries, aujourdHui, ecarts, corrections)
 
         val poids = if (lis == null) emptyList() else {
             val depuis = maxOf(lis.debut, aujourdHui.minusDays(JOURS_AFFICHES - 1))
@@ -462,12 +521,13 @@ object Labo {
                         ecartee = i in lis.ecartees,
                         apresMidi = (j?.heurePesee ?: 0) >= Kalman.HEURE_APRES_MIDI,
                         corrige = j?.let { jl -> ecarts[d]?.let { e -> poidsCorrige(jl, e) } },
+                        selle = corrections[d]?.kg,
                     )
                 }
                 .toList()
         }
 
-        val comp = compartiments(tries, aujourdHui, ecarts)
+        val comp = compartiments(tries, aujourdHui, ecarts, corrections)
         val resume = comp?.let { c ->
             val i = c.graisse.index(aujourdHui) ?: return@let null
             ResumeComposition(
@@ -482,7 +542,7 @@ object Labo {
         val septDerniersJours = if (lis == null) null else septDerniersJours(parDate, lis, comp, aujourdHui)
         // Depuis la v1.14, plus de Benjamini-Hochberg : chaque lien a son niveau de preuve bayésien, comme les
         // réflexes, et seuls « probable » et « solide » sont annoncés.
-        val lendemain = lendemain(tries, parDate, lis)
+        val lendemain = lendemain(tries, parDate, lis, corrections)
         val croises = croises(tries, parDate, enPause)
 
         return ResultatLabo(
@@ -508,8 +568,9 @@ object Labo {
             cascadeMois = if (lis != null && depart != null) {
                 CalculCascade.calculer(parDate, lis, depart, aujourdHui.minusDays(CalculCascade.JOURS_MIN.toLong()), aujourdHui)
             } else null,
-            qualite = qualite(tries, parDate, aujourdHui),
+            qualite = qualite(tries, parDate, aujourdHui, corrections),
             lissage = lis,
+            selle = selle,
             mecanismes = Mecanismes.evaluer(tries.mapNotNull { j -> j.entree?.let { j.date to it } }.toMap(), aujourdHui, enPause),
         )
     }
@@ -626,9 +687,15 @@ object Labo {
         return estimerPeriode(parDate, lis, comp, debut, 7, joursPesees, enCours = true, minPesees = 3, minDepense = 5)
     }
 
-    private fun ecartPoids(parDate: Map<LocalDate, JourLabo>, date: LocalDate, k: Long): Double? {
-        val avant = parDate[date]?.poids ?: return null
-        val apres = parDate[date.plusDays(k)]?.poids ?: return null
+    private fun ecartPoids(
+        parDate: Map<LocalDate, JourLabo>,
+        date: LocalDate,
+        k: Long,
+        corrections: Map<LocalDate, Selle.Correction>,
+    ): Double? {
+        fun p(d: LocalDate) = parDate[d]?.poids?.let { it - (corrections[d]?.kg ?: 0.0) }
+        val avant = p(date) ?: return null
+        val apres = p(date.plusDays(k)) ?: return null
         return apres - avant
     }
 
@@ -704,6 +771,7 @@ object Labo {
         tries: List<JourLabo>,
         parDate: Map<LocalDate, JourLabo>,
         lis: Kalman.Lissage?,
+        corrections: Map<LocalDate, Selle.Correction> = emptyMap(),
     ): List<EffetLendemain> {
         val tau = EXPOSITIONS_LENDEMAIN.map { it.tau }
         val expositions = EXPOSITIONS_LENDEMAIN.map { it.libelle to it.valeur }
@@ -711,7 +779,8 @@ object Labo {
 
         fun residu(d: LocalDate): Double? {
             val y = peseeRetenue(lis, parDate, d) ?: return null
-            return y - lis.niveau(lis.index(d)!!)
+            // v1.16 : pesée corrigée de la selle, pour ne pas mêler la selle aux effets de la veille.
+            return y - (corrections[d]?.kg ?: 0.0) - lis.niveau(lis.index(d)!!)
         }
 
         class Ligne(val position: Int, val residu: Double, val x: List<Double?>)
@@ -877,14 +946,19 @@ object Labo {
         }
     }
 
-    private fun qualite(tries: List<JourLabo>, parDate: Map<LocalDate, JourLabo>, aujourdHui: LocalDate): Qualite {
+    private fun qualite(
+        tries: List<JourLabo>,
+        parDate: Map<LocalDate, JourLabo>,
+        aujourdHui: LocalDate,
+        corrections: Map<LocalDate, Selle.Correction>,
+    ): Qualite {
         val renseignes28 = (1L..28L).count { k -> parDate[aujourdHui.minusDays(k)]?.entree?.vide == false }
         val premierRenseigne = tries.firstOrNull { it.entree?.vide == false }?.date
         val sans = mutableListOf<Double>()
         val avec = mutableListOf<Double>()
         if (premierRenseigne != null) {
             tries.filter { !it.date.isBefore(premierRenseigne) && it.date.isBefore(aujourdHui) }.forEach { j ->
-                val d = ecartPoids(parDate, j.date, 1) ?: return@forEach
+                val d = ecartPoids(parDate, j.date, 1, corrections) ?: return@forEach
                 if (j.entree?.vide == false) avec += d else sans += d
             }
         }
