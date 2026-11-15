@@ -50,17 +50,22 @@ import io.github.dash52000.suivinutri.data.Objectif
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.notif.Rappel
+import io.github.dash52000.suivinutri.notif.Rattrapage
 import io.github.dash52000.suivinutri.notif.Signal
 import io.github.dash52000.suivinutri.ui.EcranCap
 import io.github.dash52000.suivinutri.ui.EcranDonnees
 import io.github.dash52000.suivinutri.ui.EcranLabo
 import io.github.dash52000.suivinutri.ui.EcranReglages
 import io.github.dash52000.suivinutri.ui.EcranSoir
+import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
 
     /** Onglet demandé par une notif (le signal de la semaine ouvre Cap). */
     private val ongletDemande = mutableStateOf<Onglet?>(null)
+
+    /** Journée à ouvrir dans Ce soir (v1.17 : le rattrapage du matin ouvre hier). */
+    private val dateSoirDemandee = mutableStateOf<LocalDate?>(null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -82,6 +87,14 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(Signal.EXTRA_DEPUIS_SIGNAL)
             Usage.log(this, "ouverture_signal")
         }
+        if (intent?.getBooleanExtra(Rattrapage.EXTRA_DEPUIS_RATTRAPAGE, false) == true) {
+            intent.removeExtra(Rattrapage.EXTRA_DEPUIS_RATTRAPAGE)
+            Usage.log(this, "ouverture_rattrapage")
+        }
+        intent?.getStringExtra(Rattrapage.EXTRA_DATE)?.let { d ->
+            intent.removeExtra(Rattrapage.EXTRA_DATE)
+            runCatching { LocalDate.parse(d) }.getOrNull()?.let { dateSoirDemandee.value = it }
+        }
         val nom = intent?.getStringExtra(Signal.EXTRA_ONGLET)
         if (intent != null && nom != null) {
             intent.removeExtra(Signal.EXTRA_ONGLET)
@@ -95,6 +108,7 @@ class MainActivity : ComponentActivity() {
         noterOuvertureParNotif(intent)
         Rappel.creerCanal(this)
         Rappel.programmer(this)
+        Rattrapage.programmer(this)
         Signal.creerCanal(this)
         val health = HealthData(this)
         val journal = Journal(this)
@@ -103,7 +117,7 @@ class MainActivity : ComponentActivity() {
         Signal.programmer(this)
         setContent {
             SuiviNutriTheme {
-                App(health, journal, config, objectif, ongletDemande)
+                App(health, journal, config, objectif, ongletDemande, dateSoirDemandee)
             }
         }
     }
@@ -124,6 +138,7 @@ fun App(
     config: Configuration,
     objectif: Objectif,
     ongletDemande: MutableState<Onglet?>,
+    dateSoirDemandee: MutableState<LocalDate?>,
 ) {
     val context = LocalContext.current
     var onglet by rememberSaveable { mutableStateOf(Onglet.SOIR) }
@@ -181,7 +196,7 @@ fun App(
     ) { marges ->
         val m = Modifier.padding(marges)
         when (onglet) {
-            Onglet.SOIR -> EcranSoir(journal, config, health, m)
+            Onglet.SOIR -> EcranSoir(journal, config, health, m, dateSoirDemandee)
             Onglet.CAP -> EcranCap(health, journal, config, objectif, m)
             Onglet.DONNEES -> EcranDonnees(health, journal, config, m)
             Onglet.LABO -> EcranLabo(health, journal, config, m)

@@ -72,6 +72,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".notif.RattrapageReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".notif.DemarrageReceiver"
             android:exported="true">
             <intent-filter>

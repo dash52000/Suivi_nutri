@@ -893,6 +893,9 @@ object Labo {
         val tuppMidi: (JourLabo) -> Boolean? = { j ->
             when (j.entree?.rep("midi_quoi")) { "tupp" -> true; "prepare", "achete" -> false; else -> null }
         }
+        val ecranMidi: (JourLabo) -> Boolean? = { j ->
+            when (j.entree?.rep("midi_ecran")) { "oui" -> true; "non" -> false; else -> null }
+        }
         val rabSoir: (JourLabo) -> Boolean? = { j -> rab(j.entree) }
         val dessertSoir: (JourLabo) -> Boolean? = { j -> dessertPris(j.entree) }
         fun ouiNon(id: String): (JourLabo) -> Boolean? = { j ->
@@ -912,6 +915,10 @@ object Labo {
             Croisement("Tupp remplis la veille", "quand ils ne l'ont pas été", "tupp mangé le midi", tuppVeille, tuppMidi, ids = setOf("tupp", "midi_quoi")),
             Croisement("Les jours de séance le midi", "les autres jours", "petit creux l'après-midi", { j -> j.seanceMidi }, creux, ids = setOf("midi_creux")),
             Croisement("Après un petit creux l'après-midi", "sans creux", "rab le soir", creux, rabSoir, ids = setOf("midi_creux", "resservi")),
+            // v1.17 : l'écran pendant le repas pèse surtout sur ce qu'on mange ensuite, pas sur le repas lui-même
+            // (Robinson et al., AJCN 2013 et mise à jour 2026). Midis à la maison ou au boulot seulement.
+            Croisement("Un midi devant un écran", "un midi sans écran", "rab le soir", ecranMidi, rabSoir, ids = setOf("midi_ecran", "resservi")),
+            Croisement("Un midi devant un écran", "un midi sans écran", "dessert pris", ecranMidi, dessertSoir, ids = setOf("midi_ecran", "dessert")),
         ).filter { c -> c.ids.none { it in enPause } }
         // v1.14 : même moteur bêta-binomial que les réflexes. Les issues du soir (rab, dessert) sont comparées à lieu
         // de dîner égal ; les autres (midi, creux) en une seule strate.

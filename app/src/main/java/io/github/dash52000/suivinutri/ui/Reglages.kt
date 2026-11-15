@@ -56,6 +56,7 @@ import io.github.dash52000.suivinutri.labo.TableAnalyse
 import io.github.dash52000.suivinutri.labo.collecterJours
 import io.github.dash52000.suivinutri.labo.joursSansSante
 import io.github.dash52000.suivinutri.notif.Rappel
+import io.github.dash52000.suivinutri.notif.Rattrapage
 import io.github.dash52000.suivinutri.notif.Signal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,6 +86,7 @@ fun EcranReglages(
     var heure by remember { mutableIntStateOf(Rappel.heure(context)) }
     var minute by remember { mutableIntStateOf(Rappel.minute(context)) }
     var notifsOk by remember { mutableStateOf(Rappel.notifsAutorisees(context)) }
+    var rattrapage by remember { mutableStateOf(Rattrapage.reglageActif(context)) }
     var message by remember { mutableStateOf<String?>(null) }
     var masquerPesee by remember { mutableStateOf(Affichage.masquerPesee(context)) }
 
@@ -189,6 +191,25 @@ fun EcranReglages(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Rattrapage le lendemain matin")
+                Text(
+                    "À %02d h %02d, seulement si la veille n'a aucune réponse.".format(Rattrapage.HEURE, Rattrapage.MINUTE),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = rattrapage,
+                enabled = actif,
+                onCheckedChange = {
+                    rattrapage = it
+                    Rattrapage.regler(context, it)
+                    Usage.log(context, "reglage", "rattrapage_actif=$it")
+                },
+            )
+        }
         if (!notifsOk && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Text("Les notifications sont bloquées pour l'appli.", style = MaterialTheme.typography.bodyMedium)
             Button(onClick = { demanderNotifs.launch(Manifest.permission.POST_NOTIFICATIONS) }) {

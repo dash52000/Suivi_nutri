@@ -24,7 +24,7 @@ import java.time.ZonedDateTime
 /** Notif quotidienne qui ouvre le questionnaire du soir. Pas de relance si elle est ignorée. */
 object Rappel {
 
-    private const val CANAL = "rappel_soir"
+    const val CANAL = "rappel_soir"
     private const val ID_NOTIF = 1
 
     private fun prefs(context: Context): SharedPreferences =
@@ -41,6 +41,8 @@ object Rappel {
             .putInt("rappel_minute", minute)
             .apply()
         programmer(context)
+        // v1.17 : le rattrapage du matin suit l'interrupteur du rappel du soir.
+        Rattrapage.programmer(context)
     }
 
     fun notifsAutorisees(context: Context): Boolean =
@@ -124,12 +126,13 @@ class RappelReceiver : BroadcastReceiver() {
     }
 }
 
-/** Reprogramme les notifs (rappel du soir, signal de la semaine) après un redémarrage du téléphone ou une mise à jour de l'appli. */
+/** Reprogramme les notifs (rappel du soir, rattrapage du matin, bilan du dimanche) après un redémarrage du téléphone ou une mise à jour de l'appli. */
 class DemarrageReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
                 Rappel.programmer(context)
+                Rattrapage.programmer(context)
                 Signal.programmer(context)
             }
         }

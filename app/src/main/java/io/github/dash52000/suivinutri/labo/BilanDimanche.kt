@@ -70,6 +70,11 @@ data class ResultatBilan(
     /** Variation attendue depuis le départ aux deux bords du couloir d'effort (le moins fort, le plus fort). */
     val attenduHaut: Double?,
     val attenduBas: Double?,
+    /**
+     * v1.17 : de combien le corps dépense moins qu'au départ (kcal/j, ε × kg perdus), à partir de
+     * [BilanDimanche.PERTE_MIN_RALENTISSEMENT] kg perdus ; null avant. À effort égal, la perte ralentit d'autant.
+     */
+    val ralentissement: Double? = null,
     /** 2. Ta balance cette semaine : les 7 pesées du lundi au dimanche matin. */
     val balance: List<JourBalance>,
     /** 3. Graisse et maigre sur 4 semaines (variation et IC 95 %). */
@@ -113,6 +118,13 @@ object BilanDimanche {
      * du 10/11/2026) : à 0,5 kg, 37 % des jours sortiraient par pur bruit ; à 0,8 kg, environ 15 %, un jour par semaine.
      */
     const val SEUIL_JOUR = 0.8
+
+    /** v1.17 : la ligne sur le ralentissement n'apparaît qu'à partir de 1 kg perdu (tendance), sous ce seuil c'est du bruit. */
+    const val PERTE_MIN_RALENTISSEMENT = 1.0
+
+    /** Dépense en moins (kcal/j) pour [ecartDepart] kg de variation de la tendance ; null sous le seuil de perte. */
+    fun ralentissement(ecartDepart: Double?): Double? =
+        ecartDepart?.takeIf { it <= -PERTE_MIN_RALENTISSEMENT }?.let { -it * Hall.EPS }
 
     /** Face-à-face déclaré / mesuré : toutes les 4 semaines, à partir de la 8e (avant, la tendance rattrape le départ). */
 
@@ -339,13 +351,15 @@ object BilanDimanche {
         val proposes = propositionsLevier(parDate, entrees, dimanche, reflexes, maintenant, cap.ciblePas)
         val planVendredi = dimanche.minusDays(2)
 
+        val ecartDepart = cap.niveauActuel?.let { a -> cap.niveauDepart?.let { a - it } }
         return ResultatBilan(
             dimanche = dimanche,
             semaine = semaine,
             semainesDepuisDepart = semainesDepuis,
-            ecartDepart = cap.niveauActuel?.let { a -> cap.niveauDepart?.let { a - it } },
+            ecartDepart = ecartDepart,
             attenduHaut = Hall.variation(cap.effortHaut, t),
             attenduBas = Hall.variation(cap.effortBas, t),
+            ralentissement = ralentissement(ecartDepart),
             balance = balance,
             graisse4 = variation4(comp?.graisse),
             maigre4 = variation4(comp?.maigre),

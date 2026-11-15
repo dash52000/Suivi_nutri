@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ import io.github.dash52000.suivinutri.data.Question
 import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.StyleBoisson
 import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.notif.Rattrapage
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -67,7 +69,14 @@ private fun fmt(x: Double, decimales: Int): String =
 private fun fmtDegre(d: Double): String = if (d % 1.0 == 0.0) fmt(d, 0) else fmt(d, 1)
 
 @Composable
-fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modifier: Modifier = Modifier) {
+fun EcranSoir(
+    journal: Journal,
+    config: Configuration,
+    health: HealthData,
+    modifier: Modifier = Modifier,
+    /** v1.17 : journée demandée par la notif de rattrapage (hier), consommée à l'ouverture. */
+    dateDemandee: MutableState<LocalDate?>? = null,
+) {
     // Relu à chaque entrée dans l'onglet : reflète les changements faits dans Réglages.
     val context = LocalContext.current
     val questions = remember { config.questionnaire() }
@@ -76,6 +85,16 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
     var seance by remember(date) { mutableStateOf<Boolean?>(null) }
     var seanceMidi by remember(date) { mutableStateOf<Boolean?>(null) }
     var ressentisOuverts by remember { mutableStateOf(false) }
+
+    LaunchedEffect(dateDemandee?.value) {
+        val demande = dateDemandee ?: return@LaunchedEffect
+        val d = demande.value ?: return@LaunchedEffect
+        date = d
+        demande.value = null
+    }
+    // v1.17 : hier sans aucune réponse ? Bandeau de rattrapage sur la journée du jour (relu quand on change de jour).
+    val hier = LocalDate.now().minusDays(1)
+    var hierVide by remember(date) { mutableStateOf(journal.entree(hier).vide) }
 
     // Séances du jour, pour n'afficher que les questions utiles. En cas d'échec : on affiche tout.
     LaunchedEffect(date) {
@@ -93,6 +112,10 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
     fun mettreAJour(nouvelle: EntreeJour) {
         entree = nouvelle
         journal.enregistrer(nouvelle)
+        if (nouvelle.date == hier && !nouvelle.vide) {
+            hierVide = false
+            Rattrapage.retirer(context)
+        }
     }
 
     // Retaper la réponse choisie l'efface : retour à « pas de réponse ».
@@ -136,6 +159,21 @@ fun EcranSoir(journal: Journal, config: Configuration, health: HealthData, modif
             )
             TextButton(onClick = { date = date.plusDays(1) }, enabled = date.isBefore(LocalDate.now())) {
                 Text("›", style = MaterialTheme.typography.headlineSmall)
+            }
+        }
+        if (date == LocalDate.now() && hierVide) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Hier n'est pas rempli. Quelques taps si ça te revient, sinon ça reste vide.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        Usage.log(context, "rattrapage_bandeau", "jour=$hier")
+                        date = hier
+                    }) { Text("Remplir hier") }
+                }
             }
         }
         Text(

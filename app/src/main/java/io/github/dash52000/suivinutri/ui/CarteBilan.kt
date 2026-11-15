@@ -150,6 +150,14 @@ private fun ContenuBilan(
                     "un effort dans le couloir : entre ${signe(b.attenduHaut, 1, "kg")} et ${signe(b.attenduBas, 1, "kg")}."
             )
         }
+        b.ralentissement?.let { r ->
+            // v1.17 : la perte ralentit d'elle-même ; le couloir d'effort en tient déjà compte (Hall).
+            Texte(
+                "Avec ${nombre(-b.ecartDepart!!, 1)} kg en moins, ton corps dépense environ ${nombre(r, 0)} kcal/j de moins " +
+                    "qu'au départ. À effort égal, la perte ralentit d'elle-même : le couloir le compte déjà, ce n'est pas " +
+                    "un relâchement. Garder la pente des débuts demanderait environ ${nombre(r, 0)} kcal/j d'effort en plus."
+            )
+        }
     }
 
     // 2. Ta balance cette semaine.

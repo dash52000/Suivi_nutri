@@ -170,4 +170,14 @@ class BilanDimancheTest {
         assertEquals(3, b.budget)
         assertEquals(DayOfWeek.FRIDAY, b.soirARisque.jour)
     }
+
+    /** v1.17 : ε × kg perdus, seulement à partir de 1 kg perdu. */
+    @Test
+    fun ralentissement() {
+        assertNull(BilanDimanche.ralentissement(null))
+        assertNull(BilanDimanche.ralentissement(-0.9))
+        assertNull(BilanDimanche.ralentissement(0.5))
+        assertEquals(25.8, BilanDimanche.ralentissement(-1.0)!!, 1e-9)
+        assertEquals(103.2, BilanDimanche.ralentissement(-4.0)!!, 1e-9)
+    }
 }

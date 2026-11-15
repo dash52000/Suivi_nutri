@@ -165,6 +165,18 @@ Labo : bloc « Pesée et selle » sous la balance du lendemain ; liens dans « C
 (`SimulationSelleTest`) : avec 5 % de matins après, rien ne change (erreur de la tendance 0,135 kg avec ou sans) ;
 avec 40 %, 0,137 contre 0,160 kg ; l'effet croisé (−0,1 kg) reste illisible (3 à 10 % « probable »).
 
+### Revue de littérature du 15/11 (v1.17)
+
+- **Écran du midi → rab ou dessert le soir** : effet croisé (même moteur bêta-binomial, à lieu de dîner égal). La
+  distraction pendant le repas pèse surtout sur ce qu'on mange ensuite (Robinson et al., AJCN 2013, mise à jour 2026).
+  Simulation (`SimulationEcranTest`, écran surtout au boulot en semaine, rab plus fréquent le week-end) : sans effet,
+  « probable » 8 à 10 % ; +25 points de rab : 35 % à 6 semaines, 70 % à 12, 92 % à 24.
+- **Rattrapage du lendemain matin** : notif à 8 h 30 si la veille n'a aucune réponse (sans relance, réglable), et
+  bandeau « Remplir hier » dans Ce soir. Les soirs oubliés sont souvent les soirs chargés : les laisser vides tire les
+  effets vers zéro. La saisie différée se lit dans le journal d'usage (horodatage de la réponse ≠ jour).
+- **Bilan, bloc 1** : à partir de 1 kg perdu, une ligne rappelle que le corps dépense ε × kg perdus de moins
+  (25,8 kcal/j par kg) : à effort égal la perte ralentit, ce que le couloir d'effort compte déjà.
+
 Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
 contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
 
@@ -229,6 +241,8 @@ pesée, NA sinon), et `residu_kg` = pesée brute − correction de la selle − 
 - **v1.15** : la cascade (d'où vient la perte depuis le départ), dans le Labo et dans le bilan à la place du
   face-à-face
 - **v1.16** : pesée et selle (question du matin, correction avant le Kalman, effet croisé avec le soir copieux)
+- **v1.17** : revue de littérature du 15/11 — écran du midi → rab ou dessert le soir, rattrapage du lendemain
+  matin, ralentissement de la perte expliqué dans le bilan
 - **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
   l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
