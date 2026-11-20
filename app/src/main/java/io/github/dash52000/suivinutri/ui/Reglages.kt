@@ -52,13 +52,16 @@ import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.TypePerso
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.health.HealthData
+import io.github.dash52000.suivinutri.labo.JourLabo
 import io.github.dash52000.suivinutri.labo.TableAnalyse
 import io.github.dash52000.suivinutri.labo.collecterJours
 import io.github.dash52000.suivinutri.labo.joursSansSante
 import io.github.dash52000.suivinutri.notif.Rappel
 import io.github.dash52000.suivinutri.notif.Rattrapage
 import io.github.dash52000.suivinutri.notif.Signal
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -110,19 +113,17 @@ fun EcranReglages(
                 val aujourdHui = LocalDate.now()
                 // Une colonne par question : intégrées, perso, puis l'alcool.
                 val ids = Questionnaire.questions.map { it.id } + config.perso().map { it.id } + Questionnaire.ID_ALCOOL
-                val (jours, complet) = try {
-                    collecterJours(health, journal, aujourdHui) to true
-                } catch (e: SecurityException) {
-                    joursSansSante(journal.toutes()) to false
-                }
+                val (lus, cause) = joursPourExport(context, health, journal, config)
+                val jours = lus ?: joursSansSante(journal.toutes())
                 val etatObjectif = objectif.etat()
                 val texte = withContext(Dispatchers.Default) { TableAnalyse.csv(jours, aujourdHui, ids, etatObjectif) }
                 message = ecrire(
                     context, uri, texte,
-                    if (complet) "Table d'analyse enregistrée (une ligne par jour)."
-                    else "Health Connect inaccessible : table enregistrée avec tes réponses seulement.",
+                    if (lus != null) "Table d'analyse enregistrée (une ligne par jour)."
+                    else "Health Connect inaccessible ($cause) : table enregistrée avec tes réponses seulement. " +
+                        "Ouvre le Labo, attends le calcul, puis relance l'export.",
                 )
-                Usage.log(context, "export", if (complet) "analyse" else "analyse_sans_sante")
+                Usage.log(context, "export", if (lus != null) "analyse" else "analyse_sans_sante: $cause")
             }
         }
     }
@@ -437,6 +438,42 @@ private fun FormulaireQuestion(
             }
         }
     }
+}
+
+/**
+ * Jours de la table d'analyse (correctif du 20/11/2026). L'export reprend le calcul partagé du Labo et du Cap : en
+ * cache s'il a moins de 3 heures (aucune lecture de Health Connect), sinon la même lecture que le Labo. Avant,
+ * l'export relisait seul un an de Health Connect au retour du sélecteur de fichier ; un refus (SecurityException)
+ * y donnait une table sans poids ni montre, sans dire pourquoi (export du 20/11/2026).
+ * Un refus est retenté une fois après 2 s (au retour du sélecteur, l'appli n'est pas toujours déjà vue au premier
+ * plan par Health Connect). Renvoie (jours, null), ou (null, cause du refus).
+ */
+private suspend fun joursPourExport(
+    context: Context,
+    health: HealthData,
+    journal: Journal,
+    config: Configuration,
+): Pair<List<JourLabo>?, String?> {
+    var cause: String? = null
+    for (essai in 0..1) {
+        if (essai > 0) delay(2_000)
+        try {
+            return CalculLabo.obtenir(context, health, journal, config, forcer = false, origine = "export").jours to null
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SecurityException) {
+            cause = e.message ?: e.javaClass.simpleName
+        } catch (e: Exception) {
+            // Le calcul du Labo a échoué après la lecture : la table n'en dépend pas, on relit sans lui.
+            Usage.log(context, "export_erreur_labo", e.message ?: e.javaClass.simpleName)
+            return try {
+                collecterJours(health, journal, LocalDate.now()) to null
+            } catch (e2: SecurityException) {
+                null to (e2.message ?: e2.javaClass.simpleName)
+            }
+        }
+    }
+    return null to cause
 }
 
 private fun ecrire(context: Context, uri: Uri, texte: String, succes: String): String =
