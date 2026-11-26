@@ -28,10 +28,11 @@ Damien seul. Le soir, dans le questionnaire (ou son rattrapage du lendemain à 8
 | Sujet | Défaut |
 |---|---|
 | π de tirage | soir chargé 1 · soir normal 0,5 · midi 0,6 · matin 0,15 (0,5 tant qu'il y a moins de 3 phrases du matin) · grignotage 0,4 · plancher 0,1 · mêmes π semaine et week-end |
+| Soir chargé | **resservi (« un peu » ou « oui ») ou alcool**, d'après les taps déjà cochés. Le dessert et le dîner chez les beaux-parents n'en font pas un : ce sont ses soirs ordinaires (décision du 26/11, voir 14) |
 | Budget | environ 10 **phrases** par semaine ; les taps « Rien » et « Comme d'hab » ne comptent pas dans le budget |
-| Recalcul des π | Neyman après 4 semaines, puis chaque mois ; jamais en cours de semaine ; π réellement utilisé enregistré avec chaque tirage |
+| Recalcul des π | Neyman 4 semaines après le premier tirage, puis toutes les 4 semaines ; **un dimanche seulement**, jamais en cours de semaine ; π réellement utilisé enregistré avec chaque tirage |
 | Marge des spontanées | σ × 1,5 au départ, décroissance linéaire jusqu'à × 1 à 25 phrases comparables (même contexte) si aucun écart spontanée / tirée n'est détecté ; avec écart : reste × 1,5 et tirées vers le biais des phrases tirées |
-| Petit-déj habituel | 8 semaines glissantes, au moins 3 phrases ; appris des seules phrases tirées (poids 1/π) ; « Comme d'hab » confirme sans apprendre ; « Comme d'hab ? » absent avant 3 phrases ; nouvelle habitude si les 3 dernières phrases tirées s'écartent toutes au-delà de leur marge (l'appli repart de ces 3 et le signale dans le Labo) |
+| Petit-déj habituel | 8 semaines glissantes, au moins 3 phrases ; appris des seules phrases tirées (poids 1/π) ; « Comme d'hab » confirme sans apprendre ; « Comme d'hab ? » absent avant 3 phrases ; nouvelle habitude si les 3 dernières phrases tirées s'écartent toutes au-delà de leur marge **et dans le même sens** (l'appli repart de ces 3 et le signale dans le Labo) |
 | Chaîne LLM | `gemini-3.8-flash` → `gemini-4-hydrogen` → `gemini-3.6-flash` → `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` → `gemini-2.5-flash` → `gemini-2.5-flash-lite` → Groq `openai/gpt-oss-120b` |
 | Offre | **gratuite uniquement** (pas d'offre payante) |
 | Réglages LLM | température 0 ; niveau de réflexion bas (Hydrogen refuserait le niveau minimal : à vérifier au code) ; budget de temps de la chaîne 60 s, en arrière-plan |
@@ -40,12 +41,13 @@ Notes sur la chaîne (vérifié le 26/11) : 3.8 Flash, 3.6 Flash, 3.5 Flash-Lite
 
 ## 6. Modèle de données
 - `PhraseRepas` : id stable, jour, moment (matin / midi / soir / grignotage), texte, `origine` (tirée / chargée / spontanée), tardive (oui / non), horodatage.
-- `TirageMoment` : jour, moment, strate (moment × type de jour × taps), π, graine, réponse (phrase / rien / comme_dhab / refus / ignoré / tardif).
+- `TirageMoment` : jour, moment, strate (moment × type de jour × taps), π, graine, réponse (phrase / rien / comme_dhab / refus / ignoré ; vide = moment encore ouvert), tardive (oui / non). Type de jour : week-end = vendredi soir, samedi, dimanche ; le reste = semaine.
 - `Extraction` : id de phrase, JSON brut, modèle ayant répondu, version du prompt, version de CIQUAL, erreurs et bascules.
 - `AlimentExtrait` : nom générique, code CIQUAL (ou NA), grammes, `portion_source`, moment, rab, σ appliquée. `BoissonExtraite` : nom, format, degré.
 - `BiaisContexte` : niveau (global / midi-soir / contexte), contexte, β a posteriori (moyenne, écart-type), nombre de repas, date du calcul.
 - `ApportJour` : kcal par moment, kcal du jour, bornes à 95 %, sources de chaque moment (décrit / contexte / tap).
 - `HabitudeMatin` : kcal, σ, fenêtre, phrases utilisées.
+- Stockage : `repas.json` (hors Room), écrit en entier de façon atomique, avec un numéro de version (absent = 1 ; une version plus récente est refusée sans rien écrire). Il contient les phrases, les tirages, les extractions et un bloc `reglages` (graine fixe, table des π en vigueur, jour du dernier recalcul). Aliments et boissons ne sont jamais stockés : ils se relisent depuis le JSON brut et CIQUAL.
 - Les clés API restent dans le Keystore : hors base, hors sauvegarde JSON, hors export.
 
 ## 7. Notifications et IA
@@ -69,7 +71,7 @@ Notes sur la chaîne (vérifié le 26/11) : 3.8 Flash, 3.6 Flash, 3.5 Flash-Lite
 
 ## 9. « Fini quand… »
 1. **Saisie** : sans clé, l'export est identique au bit près à la v1.17 ; avec clé, les quatre champs et la dictée marchent, exemple grisé selon le contexte.
-2. **Tirage** : reproductible à graine fixe ; π toujours > 0 et enregistré ; soir chargé à π = 1 ; environ 10 phrases par semaine en simulation.
+2. **Tirage** : reproductible à graine fixe ; π toujours > 0 et enregistré ; soir chargé (resservi ou alcool) à π = 1 ; environ 10 phrases par semaine en simulation (≈ 11,5 avec les π de départ et 53 % de soirs chargés, ramenées à 10 par le premier recalcul).
 3. **Moment tiré** : « Rien » = zéro observé ; « Comme d'hab » = habituel ; refus sans relance, noté au journal ; grignotage vide hors tirage = NA.
 4. **Extraction** : chaque cas d'erreur de la chaîne se comporte comme en section 7, testé sur des réponses figées par modèle ; le modèle ayant réellement répondu est enregistré.
 5. **Marges** : explicite ±15 %, standard ±40 %, grosse / petite ±30 %, confiance basse × 1,5, spontanées × 1,5 décroissant (tests numériques).
@@ -109,6 +111,8 @@ Les décisions de conception du 26/11 sont en 7.2 de `suivi-nutri.md`. Ajouts de
 | 26/11 | Simulations en quatre blocs, plus 10 et 11 | Invalider le design au plus tôt ; vérifier les choix du jour |
 | 26/11 | Deux tranches | Le cœur d'abord ; les sorties dérivées sont simulées avant affichage |
 | 26/11 | Étape 1 codée : `moment` d'un aliment en `anyOf` (chaîne ou null) ; réflexion `thinkingLevel` LOW pour Gemini 3+, `thinkingBudget` 512 pour les 2.x ; schéma Gemini dans `responseFormat` ; 5xx traités comme 503 ; un 400 Groq `json_validate_failed` traité comme JSON invalide ; un 400 Gemini `API_KEY_INVALID` traité comme une clé refusée ; hors ligne = arrêt immédiat | Doc Gemini et Groq vérifiée au code : `null` dans un `enum` non garanti chez Gemini, `thinkingLevel` refusé par les 2.x |
+| 26/11 | Soir chargé (π = 1) = resservi ou alcool seulement ; le dessert et le dîner chez les beaux-parents n'en font plus un | Export du 26/11 (30 soirs) : beaux-parents 25 soirs, dessert 15, resservi 10, alcool 7. Avec la règle de la fiche, 100 % des soirs étaient chargés (13,1 phrases par semaine, jamais de tirage au soir) ; avec la nouvelle, 16 soirs sur 30 (53 %), ≈ 11,5 phrases par semaine au départ |
+| 26/11 | Étape 2 codée (`repas/` : Modeles, Marges, HabitudeMatin, Tirage, StockRepas ; 74 tests verts avec kotlinc, 5 règles cassées exprès pour vérifier que les tests les voient) : réponse sans valeur « tardif », un drapeau `tardive` à part (un « Rien » rattrapé reste un zéro observé) ; week-end = vendredi soir, samedi, dimanche ; tirage par suite de Weyl (u fixé par graine, jour et moment ; équilibré sur le jour de semaine) ; Neyman par dichotomie, π entre le plancher et 1, soirs chargés figés à 1 ; coût du grignotage 1,5 et part de phrases 0,5 (matin, grignotage) en hypothèses de départ ; recalcul un dimanche, 4 semaines après le premier tirage puis toutes les 4 semaines ; nouvelle habitude du matin : trois écarts dans le même sens ; `repas.json` version 1 avec bloc `reglages` | Garde-fous 1 et 6 : tout est testé avec le vrai code. Le coût et la part de phrases sont remplacés par les valeurs observées dès que le journal d'usage les donne ; « même sens » sera vérifié par la simulation 11 |
 
 ## 15. Checklist « terminé » du lot
 - [ ] Simulations 1 à 11 passent leurs critères
