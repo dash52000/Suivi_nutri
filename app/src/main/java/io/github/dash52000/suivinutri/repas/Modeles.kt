@@ -202,7 +202,19 @@ data class AlimentExtrait(
     val sigma: Double,
 )
 
-data class BoissonExtraite(val nom: String, val format: String?, val degre: Double?)
+/**
+ * Boisson relue depuis l'extraction + CIQUAL (`Estimation.boisson`). [kcal] = null : boisson non reconnue (reste NA).
+ * [millilitres] : volume lu ou usuel ; [sigma] : marge log-normale, comme pour un aliment.
+ */
+data class BoissonExtraite(
+    val nom: String,
+    val format: String?,
+    val degre: Double?,
+    val codeCiqual: String? = null,
+    val millilitres: Double? = null,
+    val kcal: Double? = null,
+    val sigma: Double = Marges.SIGMA_STANDARD,
+)
 
 enum class Observation { DECRIT, NON_DECRIT, RIEN, COMME_DHAB }
 
