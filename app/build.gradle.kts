@@ -77,6 +77,9 @@ dependencies {
 
     implementation("androidx.health.connect:connect-client:1.1.0")
 
+    // v1.18 : lecture JSON des réponses LLM, API arbre seulement (sans plugin) : utilisable et testable hors Android.
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
+
     testImplementation("junit:junit:4.13.2")
 }
 

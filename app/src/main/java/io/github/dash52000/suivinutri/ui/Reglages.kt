@@ -243,6 +243,8 @@ fun EcranReglages(
         HorizontalDivider()
         SectionQuestions(config)
         HorizontalDivider()
+        SectionLectureIa()
+        HorizontalDivider()
 
         Text("Sauvegarde", style = MaterialTheme.typography.titleMedium)
         Text(

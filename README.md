@@ -180,6 +180,28 @@ avec 40 %, 0,137 contre 0,160 kg ; l'effet croisé (−0,1 kg) reste illisible (
 Les tests unitaires (`app/src/test`) comparent ces calculs à des références : numpy (Kalman, vérifié
 contre la loi a posteriori exacte), statsmodels (HAC), scipy (lois de Student et normale, BH).
 
+## Lecture des phrases du repas (v1.18 B, en cours)
+
+Fiche : [`SPEC-v1.18-B.md`](SPEC-v1.18-B.md). Étape 1 livrée : clés et chaîne LLM, sans effet sur le reste de l'appli.
+
+- **Clés** (Réglages > Lecture des phrases du repas) : Gemini et Groq, facultatives. Chiffrées par une clé AES-GCM de
+  l'Android Keystore (fichier `cles_llm`), exclues de la sauvegarde Android (`res/xml/regles_*.xml`), absentes de la
+  sauvegarde JSON et de l'export ; jamais réaffichées (« clé enregistrée · •••• 1234 »), jamais journalisées.
+  `AucuneCleTest` fait échouer le build si une chaîne de la forme d'une clé Gemini ou Groq entre dans le dépôt.
+- **Chaîne de bascule** (`llm/Chaine.kt`), modifiable dans Réglages : `gemini-3.8-flash` → `gemini-4-hydrogen` →
+  `gemini-3.6-flash` → `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` → `gemini-2.5-flash` → `gemini-2.5-flash-lite`
+  → Groq `openai/gpt-oss-120b`. 503, 429, délai : un nouvel essai après 2 s puis maillon suivant ; JSON invalide : un
+  nouvel essai puis maillon suivant ; 401/403 : fournisseur sauté (clé à revoir) ; 404 : modèle sauté ; 400 : arrêt
+  sans bascule ; hors ligne ou budget de 60 s épuisé : la phrase reste en attente. Le modèle qui a réellement répondu
+  est gardé.
+- **Schéma unique** (`llm/Schema.kt`) au format strict de Groq ; le `moment` d'un aliment est un `anyOf` (chaîne ou
+  null). Réflexion basse : `thinkingLevel` pour Gemini 3 et plus, `thinkingBudget` pour les 2.x (qui refusent
+  `thinkingLevel`). Réponse revérifiée en entier par `LectureJson`.
+- **Tester les modèles** : la phrase fixe « omelette 3 œufs, salade, pain », un appel par maillon ; résultat à l'écran
+  et dans le journal d'usage (`llm_test`).
+- Tests : `ChaineTest` (réponses figées, fausse horloge, vrai transport contre un serveur local), `LectureJsonTest`,
+  `AucuneCleTest`. Le paquet `llm/` (sauf `CoffreCles.kt`) se compile seul avec kotlinc.
+
 ## Export pour l'analyse R
 
 Réglages > Exporter pour R : une ligne par jour (`read.csv`), avec pesée, heure et source, pesée écartée,
@@ -243,6 +265,8 @@ pesée, NA sinon), et `residu_kg` = pesée brute − correction de la selle − 
 - **v1.16** : pesée et selle (question du matin, correction avant le Kalman, effet croisé avec le soir copieux)
 - **v1.17** : revue de littérature du 15/11 — écran du midi → rab ou dessert le soir, rattrapage du lendemain
   matin, ralentissement de la perte expliqué dans le bilan
+- **v1.18 B** (en cours) : phrase du repas lue par un LLM (Gemini / Groq) ; étape 1 : clés chiffrées, chaîne de
+  bascule, « Tester les modèles »
 - **Après le 26/11** (à évaluer) : horizon eau en modèle espace-état, recalage du bruit et des intervalles de
   l'effort, VFC si Garmin l'envoie
 - **v2** : journal alimentaire (scan Open Food Facts, portions CIQUAL) ; refonte du design,
