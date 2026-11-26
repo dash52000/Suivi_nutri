@@ -1,5 +1,6 @@
 package io.github.dash52000.suivinutri.repas
 
+import io.github.dash52000.suivinutri.llm.Schema
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -41,6 +42,8 @@ data class LignePhrase(
     /** Modèle qui a réellement répondu ; null tant que la phrase n'a aucune extraction. */
     val modele: String?,
     val erreurs: List<String>,
+    /** Lue avec une ancienne version du prompt : sera relue à la prochaine reprise des phrases en attente. */
+    val aRelire: Boolean = false,
 )
 
 /**
@@ -131,7 +134,10 @@ class SaisieRepas(
             .sortedWith(compareByDescending<PhraseRepas> { it.jour }.thenBy { it.moment.ordinal }.thenBy { it.horodatage })
             .map { p ->
                 val e = c.extractions.filter { it.phraseId == p.id }.maxByOrNull { it.horodatage }
-                LignePhrase(p, e?.let { LectureRepas.lire(p, it, tbl) }, e?.modele, e?.erreurs.orEmpty())
+                LignePhrase(
+                    p, e?.let { LectureRepas.lire(p, it, tbl) }, e?.modele, e?.erreurs.orEmpty(),
+                    aRelire = e != null && e.versionPrompt != Schema.VERSION_PROMPT,
+                )
             }
     }
 

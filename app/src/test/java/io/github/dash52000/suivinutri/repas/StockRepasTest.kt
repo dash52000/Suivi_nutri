@@ -414,4 +414,17 @@ class StockRepasTest {
         autre.importJson(stock.exportJson())
         assertEquals(Quantite.PETITE, autre.phrase("p1")!!.quantite)
     }
+
+    @Test
+    fun phrasesEnAttenteIncluentCellesLuesAvecUneAutreVersionDuPromptSeulementSiOnLaDonne() {
+        stock.ajouterPhrase(phrase("ancienne", Moment.MIDI))
+        stock.ajouterPhrase(phrase("recente", Moment.SOIR))
+        stock.enregistrerExtraction(extraction("ancienne", v = 1))
+        stock.enregistrerExtraction(extraction("recente", v = 2))
+        assertTrue(stock.phrasesEnAttente().isEmpty())
+        assertEquals(listOf("ancienne"), stock.phrasesEnAttente(versionPrompt = 2).map { it.id })
+        // Relue avec la version 2 : c'est l'extraction la plus récente qui fait foi.
+        stock.enregistrerExtraction(extraction("ancienne", v = 2, h = t0.plusSeconds(10)))
+        assertTrue(stock.phrasesEnAttente(versionPrompt = 2).isEmpty())
+    }
 }

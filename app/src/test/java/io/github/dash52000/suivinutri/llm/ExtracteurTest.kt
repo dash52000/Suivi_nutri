@@ -1,5 +1,6 @@
 package io.github.dash52000.suivinutri.llm
 
+import io.github.dash52000.suivinutri.repas.Extraction
 import io.github.dash52000.suivinutri.repas.Moment
 import io.github.dash52000.suivinutri.repas.Origine
 import io.github.dash52000.suivinutri.repas.PhraseRepas
@@ -176,5 +177,18 @@ class ExtracteurTest {
         assertEquals(2, evenements.count { it.first == "llm_essai" })
         assertTrue(evenements.none { it.second.contains("privé") || it.second.contains("secret") })
         assertTrue(evenements.last().second.contains("modele=gemini-4-hydrogen"))
+    }
+
+    @Test
+    fun enAttenteRelitLesPhrasesLuesAvecUnAncienPrompt() {
+        phrase("vieille", "tartine de beurre de cacahuète")
+        stock.enregistrerExtraction(Extraction("vieille", brut, "gemini-3.5-flash-lite", Schema.VERSION_PROMPT - 1, ciqual, emptyList(), emptyList(), t0))
+        horloge = t0.plusSeconds(60)
+        assertEquals(1, extracteur().traiterEnAttente())
+        assertEquals(listOf("tartine de beurre de cacahuète"), appels.map { it.first })
+        assertEquals(Schema.VERSION_PROMPT, stock.extractionRetenue("vieille")!!.versionPrompt)
+        // Une fois relue, plus rien à faire.
+        assertEquals(0, extracteur().traiterEnAttente())
+        assertEquals(1, appels.size)
     }
 }

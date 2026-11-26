@@ -22,7 +22,7 @@ import kotlinx.serialization.json.putJsonObject
  */
 object Schema {
 
-    const val VERSION_PROMPT = 1
+    const val VERSION_PROMPT = 2
 
     val PORTIONS = listOf("explicite", "standard", "grosse", "petite")
     val MOMENTS_ALIMENT = listOf("matin", "midi", "apres-midi", "soir", "nuit")
@@ -106,6 +106,12 @@ object Schema {
         Règles :
         - aliments : chaque aliment solide ou plat, avec un nom générique en français (« omelette », « pain », « lasagnes »).
           N'y mets pas les boissons.
+        - Sépare toujours le support de ce qu'on met dessus ou dedans, en lignes distinctes : « tartine de beurre de
+          cacahuète et confiture » donne pain + beurre de cacahuète + confiture ; « tartine de St Moret » donne pain +
+          fromage frais à tartiner ; « sandwich jambon beurre » donne pain + jambon + beurre. Une garniture sans quantité
+          dite prend une portion « standard » de garniture (de l'ordre de 10 à 30 g), pas celle d'un plat.
+        - Nom sans marque pour un aliment : « St Moret » donne « fromage frais à tartiner », « Nutella » donne « pâte à
+          tartiner chocolat noisette ». Une poudre de protéine (whey, isolate) s'appelle « whey ».
         - grammes : ton estimation de la quantité mangée, en grammes. Tu ne calcules jamais de calories ni de nutriments.
         - portion_source :
           « explicite » si la quantité est donnée (grammes, nombre d'unités, « 3 œufs », « 2 tranches ») ;

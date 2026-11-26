@@ -82,7 +82,7 @@ internal fun CartePhrasesLues() {
     val liste = lignes.orEmpty()
     if (liste.isEmpty() && erreur == null && !ServicesRepas.disponible(context)) return
 
-    val enAttente = liste.count { it.lu == null && it.modele == null }
+    val enAttente = liste.count { (it.lu == null && it.modele == null) || it.aRelire }
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -104,9 +104,11 @@ internal fun CartePhrasesLues() {
             }
             liste.groupBy { it.phrase.jour }.forEach { (jour, duJour) ->
                 val total = duJour.mapNotNull { it.lu?.kcal }.takeIf { it.isNotEmpty() }?.sum()
+                // Un aliment non reconnu compte 0 : le total n'est alors qu'un minimum.
+                val incomplet = duJour.any { it.lu == null || it.lu.nonReconnus.isNotEmpty() }
                 Text(
                     jour.format(formatJourLong).replaceFirstChar { it.uppercase() } +
-                        (total?.let { " · ${nombre(it, 0)} kcal dans les phrases lues" } ?: ""),
+                        (total?.let { " · ${if (incomplet) "au moins " else ""}${nombre(it, 0)} kcal dans les phrases lues" } ?: ""),
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.padding(top = 4.dp),
                 )
@@ -122,7 +124,7 @@ internal fun CartePhrasesLues() {
             }
             if (enAttente > 0) {
                 OutlinedButton(onClick = { ServicesRepas.traiterEnAttente(context) }) {
-                    Text("Relire les $enAttente phrase${if (enAttente > 1) "s" else ""} en attente")
+                    Text("Lire les $enAttente phrase${if (enAttente > 1) "s" else ""} en attente ou à relire")
                 }
             }
         }
@@ -137,9 +139,12 @@ private fun LignePhraseLue(ligne: LignePhrase, lecturEnCours: Boolean) {
             "${titreMoment(ligne.phrase.moment)} : « ${ligne.phrase.texte} »",
             style = MaterialTheme.typography.bodyMedium,
         )
+        val manquants = lu?.nonReconnus?.size ?: 0
+        val partiel = if (manquants > 0) " · partiel : $manquants aliment${if (manquants > 1) "s" else ""} non reconnu${if (manquants > 1) "s" else ""}, compté${if (manquants > 1) "s" else ""} 0" else ""
+        val relire = if (ligne.aRelire) " · lue avec l'ancien prompt, sera relue" else ""
         val etat = when {
-            lu != null && lu.kcal != null -> texteKcal(lu.kcal, lu.sigma) + " · lue par ${ligne.modele ?: "?"}"
-            lu != null -> "Lue par ${ligne.modele ?: "?"}, mais aucun aliment reconnu : rien n'est compté"
+            lu != null && lu.kcal != null -> texteKcal(lu.kcal, lu.sigma) + " · lue par ${ligne.modele ?: "?"}" + partiel + relire
+            lu != null -> "Lue par ${ligne.modele ?: "?"}, mais aucun aliment reconnu : rien n'est compté$relire"
             lecturEnCours -> "Lecture en cours…"
             ligne.modele != null -> "Lue par ${ligne.modele}, mais la réponse est illisible"
             else -> "Pas encore lue (hors ligne, clé refusée ou appli fermée) : rien n'est compté"
@@ -147,7 +152,11 @@ private fun LignePhraseLue(ligne: LignePhrase, lecturEnCours: Boolean) {
         Text(
             etat,
             style = MaterialTheme.typography.bodySmall,
-            color = if (lu?.kcal != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            color = when {
+                manquants > 0 -> MaterialTheme.colorScheme.error
+                lu?.kcal != null -> MaterialTheme.colorScheme.primary
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
+            },
         )
         if (lu != null) {
             lu.aliments.forEach { a ->

@@ -86,11 +86,18 @@ class StockRepas(private val fichier: File) {
     fun extractionRetenue(phraseId: String): Extraction? =
         contenu().extractions.filter { it.phraseId == phraseId }.maxByOrNull { it.horodatage }
 
-    /** Phrases sans aucune extraction : relues à l'ouverture suivante (hors ligne, chaîne en échec, appli fermée). */
-    fun phrasesEnAttente(): List<PhraseRepas> {
+    /**
+     * Phrases à (re)lire à l'ouverture suivante : sans aucune extraction (hors ligne, chaîne en échec, appli fermée) et,
+     * si [versionPrompt] est donnée, celles dont l'extraction retenue vient d'une autre version du prompt (26/11 : le
+     * prompt corrigé doit s'appliquer aussi aux phrases déjà lues). L'ancienne lecture reste affichée jusqu'à la nouvelle.
+     */
+    fun phrasesEnAttente(versionPrompt: Int? = null): List<PhraseRepas> {
         val c = contenu()
-        val lues = c.extractions.map { it.phraseId }.toSet()
-        return c.phrases.filter { it.id !in lues }.sortedWith(compareBy({ it.jour }, { it.moment.ordinal }, { it.horodatage }))
+        val retenues = c.extractions.groupBy { it.phraseId }.mapValues { (_, l) -> l.maxBy { it.horodatage } }
+        return c.phrases.filter { p ->
+            val e = retenues[p.id]
+            e == null || (versionPrompt != null && e.versionPrompt != versionPrompt)
+        }.sortedWith(compareBy({ it.jour }, { it.moment.ordinal }, { it.horodatage }))
     }
 
     /** Table des π en vigueur (valeurs de départ si jamais recalculée). */

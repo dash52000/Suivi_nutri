@@ -78,7 +78,7 @@ class Extracteur(
      */
     fun traiterEnAttente(): Int {
         var lues = 0
-        for (p in stock.phrasesEnAttente()) {
+        for (p in stock.phrasesEnAttente(Schema.VERSION_PROMPT)) {
             when (lire(p.id)) {
                 is ResultatChaine.Reussie -> lues++
                 is ResultatChaine.Echouee -> return lues

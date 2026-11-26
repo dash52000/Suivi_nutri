@@ -72,7 +72,7 @@ class SaisieRepasTest {
             """"boissons":[],"tags":{"lieu":null,"rab":null,"dessert":null,"alcool":null},"confiance":"moyenne"}"""
 
     private fun extraire(phraseId: String, vararg aliments: Pair<String, Int>) =
-        stock.enregistrerExtraction(Extraction(phraseId, json(*aliments), "gemini-3.8-flash", 1, table.version, emptyList(), emptyList(), horloge))
+        stock.enregistrerExtraction(Extraction(phraseId, json(*aliments), "gemini-3.8-flash", io.github.dash52000.suivinutri.llm.Schema.VERSION_PROMPT, table.version, emptyList(), emptyList(), horloge))
 
     // ---------- Tirage ----------
 
@@ -531,5 +531,20 @@ class SaisieRepasTest {
         val p1 = saisie.enregistrerPhrase(aujourdhui, Moment.SOIR, "a", sansTap)!!
         stock.ajouterPhrase(PhraseRepas("hier", hier, Moment.MIDI, "b", Origine.SPONTANEE, false, horloge))
         assertEquals(listOf(p1.id, "hier"), saisie.lignesPhrases(hier).map { it.phrase.id })
+    }
+
+    @Test
+    fun lignesPhrasesSignaleUnePhraseLueAvecUnAncienPrompt() {
+        fixerGraine(aujourdhui, Moment.SOIR to true)
+        val p = saisie.enregistrerPhrase(aujourdhui, Moment.SOIR, "omelette", sansTap)!!
+        stock.enregistrerExtraction(
+            Extraction(p.id, json("omelette" to 150), "gemini-3.5-flash-lite", io.github.dash52000.suivinutri.llm.Schema.VERSION_PROMPT - 1, table.version, emptyList(), emptyList(), horloge),
+        )
+        val l = saisie.lignesPhrases(aujourdhui).single()
+        assertTrue(l.aRelire)
+        assertNotNull(l.lu)
+        horloge = horloge.plusSeconds(60)
+        extraire(p.id, "omelette" to 150)
+        assertFalse(saisie.lignesPhrases(aujourdhui).single().aRelire)
     }
 }
