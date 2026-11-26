@@ -15,10 +15,10 @@ data class PhraseMatin(val jour: LocalDate, val kcal: Double, val sigma: Double,
  *  - appris des seules phrases **tirées** (une phrase spontanée du matin est un écart par construction), pondérées
  *    1/π ; un « Comme d'hab » confirme sans apprendre (il n'entre pas ici) ;
  *  - au moins 3 phrases ; en dessous, pas d'habitude : « Comme d'hab ? » n'est pas proposé et π du matin reste à 0,5 ;
- *  - nouvelle habitude : si les 3 dernières phrases tirées s'écartent **toutes au-delà de leur marge, dans le même
+ *  - nouvelle habitude : si les 3 dernières phrases tirées s'écartent **toutes au-delà de 1,5 fois leur marge, dans le même
  *    sens**, de l'habitude apprise avant elles, l'appli repart de ces 3 phrases (et le signale dans le Labo).
  *    Le « même sens » est une précision du 26/11 : trois écarts de sens opposés sont du bruit, pas un changement ;
- *    la simulation 11 le vérifiera.
+ *    la simulation 11 l'a vérifié (26/11) : à 1 fois la marge, 17 % de faux changements en 24 semaines ; à 1,5 fois, 7 %.
  *
  * [kcal] = moyenne pondérée des kcal ; [sigma] = marge log-normale de l'habitude (dispersion d'un matin à l'autre
  * et marges des phrases, divisée par le nombre de phrases). Recalculé à chaque ouverture, jamais stocké.
@@ -35,6 +35,9 @@ data class HabitudeMatin(
     companion object {
         const val FENETRE_JOURS = 56
         const val PHRASES_MIN = 3
+
+        /** Un écart ne compte que s'il dépasse cette fois la marge de la phrase (1 : 17 % de faux changements en 24 semaines, simulation 11). */
+        const val ECART_EN_MARGES = 1.5
 
         /** Habitude apprise à la date [aujourdhui], ou null avec moins de [PHRASES_MIN] phrases tirées dans la fenêtre. */
         fun apprendre(phrases: List<PhraseMatin>, aujourdhui: LocalDate): HabitudeMatin? {
@@ -81,7 +84,7 @@ data class HabitudeMatin(
 
         private fun ecartDeMemeSens(centreLog: Double, trio: List<PhraseMatin>): Boolean {
             val ecarts = trio.map { ln(it.kcal) - centreLog }
-            if (!trio.indices.all { abs(ecarts[it]) > trio[it].sigma }) return false
+            if (!trio.indices.all { abs(ecarts[it]) > ECART_EN_MARGES * trio[it].sigma }) return false
             return ecarts.all { it > 0.0 } || ecarts.all { it < 0.0 }
         }
     }
