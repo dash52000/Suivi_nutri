@@ -32,6 +32,18 @@ data class VueMoment(
 )
 
 /**
+ * Une phrase telle que l'écran « Phrases lues » (onglet Données) la montre. [lu] = null : pas encore lue ([modele] = null)
+ * ou lue mais illisible ([modele] renseigné). Les kcal viennent de [RepasLu] : recalculées, jamais stockées.
+ */
+data class LignePhrase(
+    val phrase: PhraseRepas,
+    val lu: RepasLu?,
+    /** Modèle qui a réellement répondu ; null tant que la phrase n'a aucune extraction. */
+    val modele: String?,
+    val erreurs: List<String>,
+)
+
+/**
  * Logique de l'écran Ce soir (étape 6, fiche SPEC sections 4, 5 et 9) : tirage des moments, enregistrement des phrases,
  * taps « Rien » / « Comme d'hab » / « Pas maintenant », quantité, midi pré-rempli, petit-déj habituel. Aucune dépendance
  * Android : l'écran Compose n'est qu'une peau sur cette classe, qui se teste avec kotlinc.
@@ -105,6 +117,22 @@ class SaisieRepas(
             prerempli = if (moment == Moment.MIDI && sansPhrase) midiPrerempli(jour, reponses, reponsesVeille) else null,
             habitudeConnue = HabitudeMatin.proposable(habitude),
         )
+    }
+
+    /**
+     * Les phrases écrites depuis [depuis], la plus récente d'abord (puis matin, midi, soir, grignotage), avec leur lecture.
+     * Sert à l'écran « Phrases lues » : montrer ce qui est pris en compte et les kcal calculées (décision du 26/11, à la
+     * demande de Damien : kcal dans Données, jamais dans Ce soir). Lit des fichiers et la table : hors du fil principal.
+     */
+    fun lignesPhrases(depuis: LocalDate): List<LignePhrase> {
+        val c = stock.contenu()
+        val tbl by lazy(table)
+        return c.phrases.filter { !it.jour.isBefore(depuis) }
+            .sortedWith(compareByDescending<PhraseRepas> { it.jour }.thenBy { it.moment.ordinal }.thenBy { it.horodatage })
+            .map { p ->
+                val e = c.extractions.filter { it.phraseId == p.id }.maxByOrNull { it.horodatage }
+                LignePhrase(p, e?.let { LectureRepas.lire(p, it, tbl) }, e?.modele, e?.erreurs.orEmpty())
+            }
     }
 
     /** Taps proposés sous un moment demandé (SPEC section 4). */

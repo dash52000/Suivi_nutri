@@ -487,4 +487,49 @@ class SaisieRepasTest {
         saisie.enregistrerPhrase(aujourdhui, Moment.MIDI, "confidentiel : tupp secret", sansTap)
         assertTrue(evenements.none { it.second.contains("confidentiel") || it.second.contains("secret") })
     }
+
+    // ---------- Écran « Phrases lues » (Données) ----------
+
+    @Test
+    fun lignesPhrasesMontreLEtatDeLectureEtLesKcalRecalculees() {
+        fixerGraine(aujourdhui, Moment.MIDI to true, Moment.SOIR to true)
+        val midi = saisie.enregistrerPhrase(aujourdhui, Moment.MIDI, "lasagnes", sansTap)!!
+        val soir = saisie.enregistrerPhrase(aujourdhui, Moment.SOIR, "omelette", sansTap)!!
+        extraire(midi.id, "lasagnes" to 300)
+
+        val lignes = saisie.lignesPhrases(aujourdhui)
+        assertEquals(listOf(Moment.MIDI, Moment.SOIR), lignes.map { it.phrase.moment })
+        val lueMidi = lignes[0]
+        assertNotNull(lueMidi.lu)
+        assertEquals("gemini-3.8-flash", lueMidi.modele)
+        assertTrue((lueMidi.lu!!.kcal ?: 0.0) > 100.0)
+        // Le soir n'est pas encore lu : ni lecture ni modèle.
+        assertNull(lignes[1].lu)
+        assertNull(lignes[1].modele)
+        assertEquals(soir.id, lignes[1].phrase.id)
+    }
+
+    @Test
+    fun lignesPhrasesSignaleLesAlimentsNonReconnusEtRespecteLaFenetre() {
+        fixerGraine(aujourdhui, Moment.SOIR to true)
+        fixerGraine(hier, Moment.SOIR to true)
+        val vieille = PhraseRepas("vieille", aujourdhui.minusDays(20), Moment.SOIR, "x", Origine.SPONTANEE, false, horloge)
+        stock.ajouterPhrase(vieille)
+        val p = saisie.enregistrerPhrase(aujourdhui, Moment.SOIR, "zzqx", sansTap)!!
+        extraire(p.id, "zzqxwv" to 100)
+
+        val lignes = saisie.lignesPhrases(aujourdhui.minusDays(14))
+        assertEquals(listOf(p.id), lignes.map { it.phrase.id })
+        val lu = lignes.single().lu!!
+        assertNull(lu.kcal)
+        assertEquals(listOf("zzqxwv"), lu.nonReconnus)
+    }
+
+    @Test
+    fun lignesPhrasesRangeLesJoursDuPlusRecentAuPlusAncien() {
+        fixerGraine(aujourdhui, Moment.SOIR to true)
+        val p1 = saisie.enregistrerPhrase(aujourdhui, Moment.SOIR, "a", sansTap)!!
+        stock.ajouterPhrase(PhraseRepas("hier", hier, Moment.MIDI, "b", Origine.SPONTANEE, false, horloge))
+        assertEquals(listOf(p1.id, "hier"), saisie.lignesPhrases(hier).map { it.phrase.id })
+    }
 }

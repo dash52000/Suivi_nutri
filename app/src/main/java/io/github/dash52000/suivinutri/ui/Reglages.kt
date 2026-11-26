@@ -60,7 +60,9 @@ import io.github.dash52000.suivinutri.notif.Rappel
 import io.github.dash52000.suivinutri.notif.Rattrapage
 import io.github.dash52000.suivinutri.notif.Signal
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -108,22 +110,41 @@ fun EcranReglages(
     }
     val exporterCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) {
-            message = "Préparation de la table d'analyse…"
-            scope.launch {
+            message = "Préparation de la table d'analyse… (ne quitte pas l'appli avant le message de fin)"
+            val appCtx = context.applicationContext
+            // Hors de l'écran : changer d'onglet n'annule plus le calcul. Sinon le fichier choisi restait à 0 octet,
+            // créé par le sélecteur avant que la table soit prête.
+            scopeExport.launch {
                 val aujourdHui = LocalDate.now()
                 // Une colonne par question : intégrées, perso, puis l'alcool.
                 val ids = Questionnaire.questions.map { it.id } + config.perso().map { it.id } + Questionnaire.ID_ALCOOL
-                val (lus, cause) = joursPourExport(context, health, journal, config)
-                val jours = lus ?: joursSansSante(journal.toutes())
-                val etatObjectif = objectif.etat()
-                val texte = withContext(Dispatchers.Default) { TableAnalyse.csv(jours, aujourdHui, ids, etatObjectif) }
-                message = ecrire(
-                    context, uri, texte,
-                    if (lus != null) "Table d'analyse enregistrée (une ligne par jour)."
-                    else "Health Connect inaccessible ($cause) : table enregistrée avec tes réponses seulement. " +
-                        "Ouvre le Labo, attends le calcul, puis relance l'export.",
-                )
-                Usage.log(context, "export", if (lus != null) "analyse" else "analyse_sans_sante: $cause")
+                message = try {
+                    val (lus, cause) = joursPourExport(appCtx, health, journal, config)
+                    val jours = lus ?: joursSansSante(journal.toutes())
+                    val texte = TableAnalyse.csv(jours, aujourdHui, ids, objectif.etat())
+                    Usage.log(appCtx, "export", if (lus != null) "analyse" else "analyse_sans_sante: $cause")
+                    ecrire(
+                        appCtx, uri, texte,
+                        if (lus != null) "Table d'analyse enregistrée (une ligne par jour)."
+                        else "Health Connect inaccessible ($cause) : table enregistrée avec tes réponses seulement. " +
+                            "Ouvre le Labo, attends le calcul, puis relance l'export.",
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // Dernier recours : un fichier jamais vide, avec les réponses seules, et la cause dans le journal.
+                    Usage.log(appCtx, "export_erreur", e.message ?: e.javaClass.simpleName)
+                    try {
+                        val texte = TableAnalyse.csv(joursSansSante(journal.toutes()), aujourdHui, ids, objectif.etat())
+                        ecrire(
+                            appCtx, uri, texte,
+                            "Le calcul complet a échoué (${e.message ?: e.javaClass.simpleName}) : table enregistrée " +
+                                "avec tes réponses seulement.",
+                        )
+                    } catch (e2: Exception) {
+                        "Échec de l'export : ${e2.message ?: e2.javaClass.simpleName}"
+                    }
+                }
             }
         }
     }
@@ -477,6 +498,9 @@ private suspend fun joursPourExport(
     }
     return null to cause
 }
+
+/** Portée de l'export CSV : vit autant que l'appli, pour que quitter l'onglet n'interrompe pas l'écriture. */
+private val scopeExport = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 private fun ecrire(context: Context, uri: Uri, texte: String, succes: String): String =
     try {
