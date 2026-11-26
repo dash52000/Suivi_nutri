@@ -426,29 +426,70 @@ class ChaineTest {
 
     // --- Vrai transport HTTP, contre un serveur local ---
 
+    /**
+     * Mini serveur HTTP local sur [java.net.ServerSocket] (com.sun.net.httpserver n'est pas visible dans les tests
+     * unitaires Android). Une connexion par requête ; [repondre] reçoit (chemin, en-têtes en minuscules, corps).
+     */
+    private class ServeurLocal(private val repondre: (String, Map<String, String>, String) -> Pair<Int, String>?) : AutoCloseable {
+        private val socket = java.net.ServerSocket(0, 50, java.net.InetAddress.getByName("127.0.0.1"))
+        val port: Int get() = socket.localPort
+        private val fil = Thread {
+            while (!socket.isClosed) {
+                val client = try { socket.accept() } catch (e: IOException) { break }
+                Thread { servir(client) }.apply { isDaemon = true }.start()
+            }
+        }.apply { isDaemon = true; start() }
+
+        private fun servir(client: java.net.Socket) = client.use { c ->
+            val entree = java.io.BufferedInputStream(c.getInputStream())
+            fun ligne(): String {
+                val b = java.io.ByteArrayOutputStream()
+                while (true) {
+                    val x = entree.read()
+                    if (x == -1 || x == '\n'.code) break
+                    if (x != '\r'.code) b.write(x)
+                }
+                return b.toString(Charsets.UTF_8.name())
+            }
+            val chemin = ligne().split(" ").getOrElse(1) { "/" }
+            val entetes = mutableMapOf<String, String>()
+            while (true) {
+                val l = ligne()
+                if (l.isEmpty()) break
+                val i = l.indexOf(':')
+                if (i > 0) entetes[l.substring(0, i).trim().lowercase()] = l.substring(i + 1).trim()
+            }
+            val n = entetes["content-length"]?.toIntOrNull() ?: 0
+            val corps = ByteArray(n).also { var lu = 0; while (lu < n) { val k = entree.read(it, lu, n - lu); if (k < 0) break; lu += k } }
+            val (code, reponse) = repondre(chemin, entetes, String(corps, Charsets.UTF_8)) ?: return@use
+            val octets = reponse.toByteArray(Charsets.UTF_8)
+            val sortie = c.getOutputStream()
+            sortie.write(("HTTP/1.1 $code X\r\nContent-Type: application/json\r\nContent-Length: ${octets.size}\r\n" +
+                "Connection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
+            sortie.write(octets)
+            sortie.flush()
+        }
+
+        override fun close() = socket.close()
+    }
+
     @Test
     fun httpTransportCodesDelaiEtHorsLigne() {
-        val serveur = com.sun.net.httpserver.HttpServer.create(java.net.InetSocketAddress("127.0.0.1", 0), 0)
         var enteteRecue: String? = null
         var corpsRecu = ""
-        serveur.createContext("/ok") { ex ->
-            enteteRecue = ex.requestHeaders.getFirst("x-goog-api-key")
-            corpsRecu = ex.requestBody.bufferedReader().readText()
-            val r = "{\"ok\":\"é\"}".toByteArray()
-            ex.sendResponseHeaders(200, r.size.toLong()); ex.responseBody.use { it.write(r) }
-        }
-        serveur.createContext("/503") { ex ->
-            val r = "surcharge".toByteArray()
-            ex.sendResponseHeaders(503, r.size.toLong()); ex.responseBody.use { it.write(r) }
-        }
-        serveur.createContext("/lent") { ex ->
-            Thread.sleep(1_500)
-            ex.sendResponseHeaders(200, -1); ex.close()
-        }
-        serveur.executor = java.util.concurrent.Executors.newCachedThreadPool()
-        serveur.start()
-        try {
-            val base = "http://127.0.0.1:${serveur.address.port}"
+        ServeurLocal { chemin, entetes, corps ->
+            when (chemin) {
+                "/ok" -> {
+                    enteteRecue = entetes["x-goog-api-key"]
+                    corpsRecu = corps
+                    200 to "{\"ok\":\"é\"}"
+                }
+                "/503" -> 503 to "surcharge"
+                "/lent" -> { Thread.sleep(1_500); 200 to "{}" }
+                else -> 404 to ""
+            }
+        }.use { serveur ->
+            val base = "http://127.0.0.1:${serveur.port}"
             val ok = HttpTransport.envoyer(RequeteHttp("$base/ok", mapOf("x-goog-api-key" to cleGemini), "{\"a\":\"œuf\"}"), 2_000, 2_000)
             assertEquals(ReponseHttp(200, "{\"ok\":\"é\"}"), ok)
             assertEquals(cleGemini, enteteRecue)
@@ -460,8 +501,6 @@ class ChaineTest {
             } catch (e: DelaiDepasse) {
                 // attendu
             }
-        } finally {
-            serveur.stop(0)
         }
         val portFerme = java.net.ServerSocket(0).use { it.localPort }
         try {
