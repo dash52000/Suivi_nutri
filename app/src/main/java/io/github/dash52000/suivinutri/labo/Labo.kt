@@ -487,6 +487,31 @@ object Labo {
     // ---------- Analyse complète ----------
 
     /**
+     * v1.18 B : ce que la balance et la montre disent, jour par jour, pour le modèle de biais des repas ([BiaisRepas]).
+     * Pesées retenues (non écartées par le Kalman), corrigées de l'eau et de la selle comme pour la tendance, avec
+     * leur variance ; dépense retenue de chaque jour ([kcalRetenue]).
+     */
+    fun observationsBalance(jours: List<JourLabo>, aujourdHui: LocalDate): ObservationsBalance {
+        val tries = jours.sortedBy { it.date }
+        val ecarts = ecartsEau(tries, aujourdHui)
+        val corrections = correctionsSelle(tries, modeleSelle(tries, aujourdHui, ecarts))
+        val lis = lissage(tries, aujourdHui, ecarts, corrections)
+        val pesees = if (lis == null) emptyList() else tries.mapNotNull { j ->
+            if (j.poids == null) return@mapNotNull null
+            val i = lis.index(j.date) ?: return@mapNotNull null
+            if (i in lis.ecartees) return@mapNotNull null
+            val c = corrections[j.date]
+            PeseeJour(
+                j.date,
+                poidsCorrige(j, ecarts[j.date])!! - (c?.kg ?: 0.0),
+                (if (ecarts[j.date] != null) Kalman.POIDS_CORRIGE else Kalman.POIDS).variance(j.heurePesee) + (c?.variance ?: 0.0),
+            )
+        }
+        val depenses = tries.mapNotNull { j -> kcalRetenue(j)?.let { j.date to it } }.toMap()
+        return ObservationsBalance(pesees, depenses)
+    }
+
+    /**
      * [reflexesPerso] : questions ajoutées par l'utilisateur, avec leur score (1 = tenu, 0 = pas tenu),
      * analysées comme les réflexes intégrés.
      */
