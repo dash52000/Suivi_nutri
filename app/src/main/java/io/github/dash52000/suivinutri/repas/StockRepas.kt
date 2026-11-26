@@ -104,6 +104,24 @@ class StockRepas(private val fichier: File) {
         ecrire(c.copy(phrases = c.phrases.filter { it.id != p.id } + p))
     }
 
+    /** Retire une phrase et ses extractions (correction d'une phrase : on supprime puis on recrée, nouvelle id). Faux si inconnue. */
+    @Synchronized
+    fun supprimerPhrase(id: String): Boolean {
+        val c = contenu()
+        if (c.phrases.none { it.id == id }) return false
+        ecrire(c.copy(phrases = c.phrases.filter { it.id != id }, extractions = c.extractions.filter { it.phraseId != id }))
+        return true
+    }
+
+    /** Le tap petite / normale / grosse d'une phrase (null l'efface). Faux si la phrase est inconnue. */
+    @Synchronized
+    fun definirQuantite(id: String, quantite: Quantite?): Boolean {
+        val c = contenu()
+        if (c.phrases.none { it.id == id }) return false
+        ecrire(c.copy(phrases = c.phrases.map { if (it.id == id) it.copy(quantite = quantite) else it }))
+        return true
+    }
+
     @Synchronized
     fun enregistrerTirage(t: TirageMoment) {
         val c = contenu()
@@ -220,6 +238,7 @@ class StockRepas(private val fichier: File) {
                         put("origine", p.origine.code)
                         put("tardive", p.tardive)
                         put("horodatage", p.horodatage.toString())
+                        p.quantite?.let { put("quantite", it.code) } // absent = pas de tap (fichiers d'avant l'étape 6 inchangés)
                     })
                 }
             }
@@ -270,6 +289,7 @@ class StockRepas(private val fichier: File) {
                     origine = Origine.depuisCode(p.texte("origine")),
                     tardive = p.getValue("tardive").jsonPrimitive.boolean,
                     horodatage = Instant.parse(p.texte("horodatage")),
+                    quantite = p["quantite"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let(Quantite::depuisCode),
                 )
             }
             val tirages = (o["tirages"]?.jsonArray ?: emptyList()).map { it.jsonObject }.map { t ->

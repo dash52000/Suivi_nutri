@@ -48,6 +48,7 @@ import io.github.dash52000.suivinutri.data.Questionnaire
 import io.github.dash52000.suivinutri.data.StyleBoisson
 import io.github.dash52000.suivinutri.health.HealthData
 import io.github.dash52000.suivinutri.notif.Rattrapage
+import io.github.dash52000.suivinutri.repas.ServicesRepas
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -80,6 +81,7 @@ fun EcranSoir(
     // Relu à chaque entrée dans l'onglet : reflète les changements faits dans Réglages.
     val context = LocalContext.current
     val questions = remember { config.questionnaire() }
+    val phrasesActives = remember { ServicesRepas.disponible(context) }
     var date by remember { mutableStateOf(LocalDate.now()) }
     var entree by remember(date) { mutableStateOf(journal.entree(date)) }
     var seance by remember(date) { mutableStateOf<Boolean?>(null) }
@@ -204,6 +206,12 @@ fun EcranSoir(
             },
                 )
             }
+        }
+
+        // v1.18 B : les phrases du repas, seulement si une clé API est saisie (sans clé, l'écran reste celui de la v1.17).
+        if (phrasesActives) {
+            val reponsesVeille = remember(date) { journal.entree(date.minusDays(1)).reponses }
+            SectionPhrases(date, entree.reponses, reponsesVeille)
         }
 
         if (questions.any { it.ressenti }) TextButton(onClick = { ressentisOuverts = !ressentisOuverts }) {

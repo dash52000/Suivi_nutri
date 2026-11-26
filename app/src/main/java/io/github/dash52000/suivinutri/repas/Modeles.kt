@@ -141,7 +141,27 @@ data class Strate(val moment: Moment, val typeJour: TypeJour, val charge: Boolea
 // Ce qui est stocké
 // ---------------------------------------------------------------------------------------------------------------
 
-/** Une phrase saisie. [id] stable (UUID). Le texte part chez le fournisseur LLM, avec le moment, rien d'autre. */
+/**
+ * Un tap sous une phrase dont au moins une ligne est revenue en portion « standard » (étape 6, 26/11) : petite · normale ·
+ * grosse. Le tap ne touche que les lignes d'aliments « standard » : grammes × [facteur], et la marge passe à celle de
+ * « grosse ou petite » (0,30) pour petite et grosse ; « normale » ne change rien (grammes ni marge). Boissons et lignes
+ * déjà explicites, grosses ou petites ne bougent pas.
+ *
+ * Les facteurs sont des hypothèses de départ (0,7 et 1,4), à remplacer par ce que le journal d'usage et la balance
+ * montrent : le biais du contexte absorbe l'écart en attendant. Jamais envoyé au LLM, jamais une kcal affichée.
+ */
+enum class Quantite(val code: String, val facteur: Double) {
+    PETITE("petite", 0.7), NORMALE("normale", 1.0), GROSSE("grosse", 1.4);
+
+    companion object {
+        fun depuisCode(code: String): Quantite = trouver(entries, code, { it.code }, "quantité")
+    }
+}
+
+/**
+ * Une phrase saisie. [id] stable (UUID). Le texte part chez le fournisseur LLM, avec le moment, rien d'autre.
+ * [quantite] : le tap petite / normale / grosse (null = pas de tap), voir [Quantite].
+ */
 data class PhraseRepas(
     val id: String,
     val jour: LocalDate,
@@ -150,6 +170,7 @@ data class PhraseRepas(
     val origine: Origine,
     val tardive: Boolean,
     val horodatage: Instant,
+    val quantite: Quantite? = null,
 )
 
 /**
