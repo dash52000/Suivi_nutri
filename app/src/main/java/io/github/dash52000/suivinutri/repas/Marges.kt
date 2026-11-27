@@ -8,7 +8,8 @@ import kotlin.math.sqrt
  * Damien n'indique jamais son degré d'incertitude : le LLM étiquette `portion_source` et `confiance`, le code applique
  * la marge. Chaque marge est l'écart-type σ d'une loi log-normale sur les kcal d'un aliment (σ = 0,15 : ±15 %).
  *
- *  - quantité explicite : 0,15 · standard : 0,40 · grosse ou petite : 0,30 ;
+ *  - quantité explicite (un poids ou un volume est dit) : 0,15 · nombre d'unités sans poids : 0,25 · standard : 0,40 ·
+ *    grosse ou petite : 0,30 ;
  *  - confiance basse : × 1,5 ;
  *  - phrase spontanée (hors tirage) : × 1,5 au départ, décroissant linéairement jusqu'à × 1 à 25 phrases comparables
  *    (même contexte), tant qu'aucun écart spontanée / tirée n'est détecté ; avec écart, elle reste à × 1,5.
@@ -18,6 +19,12 @@ import kotlin.math.sqrt
 object Marges {
 
     const val SIGMA_EXPLICITE = 0.15
+
+    /**
+     * « 1 tartine », « 2 crépinettes » : le nombre est dit, les grammes sont devinés. Hypothèse de départ (27/11), non
+     * mesurée : entre le poids dit (0,15) et l'absence de quantité (0,40).
+     */
+    const val SIGMA_UNITES = 0.25
     const val SIGMA_STANDARD = 0.40
     const val SIGMA_GROSSE_OU_PETITE = 0.30
 
@@ -29,6 +36,7 @@ object Marges {
 
     fun sigmaPortion(portion: PortionSource): Double = when (portion) {
         PortionSource.EXPLICITE -> SIGMA_EXPLICITE
+        PortionSource.UNITES -> SIGMA_UNITES
         PortionSource.STANDARD -> SIGMA_STANDARD
         PortionSource.GROSSE, PortionSource.PETITE -> SIGMA_GROSSE_OU_PETITE
     }

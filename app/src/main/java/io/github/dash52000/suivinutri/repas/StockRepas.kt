@@ -87,6 +87,25 @@ class StockRepas(private val fichier: File) {
         contenu().extractions.filter { it.phraseId == phraseId }.maxByOrNull { it.horodatage }
 
     /**
+     * Lecture à reprendre pour [phrase] (27/11) : l'extraction retenue d'**une autre** phrase dont le texte normalisé
+     * (`Texte.phrase`) est identique, à condition qu'elle vienne du prompt [versionPrompt] en vigueur. Même phrase, même
+     * lecture, sans nouvel appel au LLM : deux lectures du même petit-déj ne devinent plus deux fois les grammes. S'il y
+     * en a plusieurs, la plus ancienne ; null si aucune. Le moment de la phrase n'entre pas dans la comparaison.
+     */
+    fun extractionIdentique(phrase: PhraseRepas, versionPrompt: Int): Extraction? {
+        val cible = Texte.phrase(phrase.texte)
+        if (cible.isEmpty()) return null
+        val c = contenu()
+        val jumelles = c.phrases.filter { it.id != phrase.id && Texte.phrase(it.texte) == cible }.map { it.id }.toSet()
+        if (jumelles.isEmpty()) return null
+        return c.extractions.groupBy { it.phraseId }
+            .filterKeys { it in jumelles }
+            .map { (_, l) -> l.maxBy { it.horodatage } }
+            .filter { it.versionPrompt == versionPrompt }
+            .minWithOrNull(compareBy({ it.horodatage }, { it.phraseId }))
+    }
+
+    /**
      * Phrases à (re)lire à l'ouverture suivante : sans aucune extraction (hors ligne, chaîne en échec, appli fermée) et,
      * si [versionPrompt] est donnée, celles dont l'extraction retenue vient d'une autre version du prompt (26/11 : le
      * prompt corrigé doit s'appliquer aussi aux phrases déjà lues). L'ancienne lecture reste affichée jusqu'à la nouvelle.

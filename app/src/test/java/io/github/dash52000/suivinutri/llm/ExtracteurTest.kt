@@ -139,11 +139,11 @@ class ExtracteurTest {
 
     @Test
     fun enAttenteLitToutesLesPhrasesLaPlusAncienneDAbord() {
-        phrase("b", h = t0.plusSeconds(60))
-        phrase("a", h = t0)
+        phrase("b", "riz", h = t0.plusSeconds(60))
+        phrase("a", "pâtes", h = t0)
         suivant = { texte, _ -> reussie() }
         assertEquals(2, extracteur().traiterEnAttente())
-        assertEquals(listOf("pâtes", "pâtes"), appels.map { it.first })
+        assertEquals(listOf("pâtes", "riz"), appels.map { it.first })
         assertTrue(stock.phrasesEnAttente().isEmpty())
     }
 
@@ -177,6 +177,35 @@ class ExtracteurTest {
         assertEquals(2, evenements.count { it.first == "llm_essai" })
         assertTrue(evenements.none { it.second.contains("privé") || it.second.contains("secret") })
         assertTrue(evenements.last().second.contains("modele=gemini-4-hydrogen"))
+    }
+
+    @Test
+    fun uneMemePhraseAuTexteNormaliseReprendLaLectureSansAppel() {
+        phrase("a", "2 tartines de confiture, un café !", Moment.MATIN, t0)
+        phrase("b", "  2 TARTINES de confiture ;  un cafe", Moment.MATIN, t0.plusSeconds(86_400))
+        suivant = { _, _ -> reussie(hydrogen) }
+        horloge = t0.plusSeconds(172_800)
+        assertEquals(2, extracteur().traiterEnAttente())
+        assertEquals(1, appels.size) // la première par le LLM, la seconde par reprise
+        val a = stock.extractionRetenue("a")!!
+        val b = stock.extractionRetenue("b")!!
+        assertEquals(a.jsonBrut, b.jsonBrut)
+        assertEquals(a.modele, b.modele)
+        assertEquals(Schema.VERSION_PROMPT, b.versionPrompt)
+        assertTrue(stock.phrasesEnAttente(Schema.VERSION_PROMPT).isEmpty())
+        assertTrue(evenements.any { it.first == "llm_lecture" && it.second.contains("reprise=a") })
+    }
+
+    @Test
+    fun uneLectureDUnAncienPromptOuUnAutreTexteNEstPasReprise() {
+        phrase("vieille", "pain beurre", Moment.MATIN, t0)
+        stock.enregistrerExtraction(Extraction("vieille", brut, "gemini-3.5-flash-lite", Schema.VERSION_PROMPT - 1, ciqual, emptyList(), emptyList(), t0))
+        phrase("neuve", "Pain, beurre", Moment.MATIN, t0.plusSeconds(60))
+        phrase("autre", "pain, beurre et confiture", Moment.MATIN, t0.plusSeconds(120))
+        val ex = extracteur()
+        ex.lire("neuve")
+        ex.lire("autre")
+        assertEquals(listOf("Pain, beurre", "pain, beurre et confiture"), appels.map { it.first })
     }
 
     @Test

@@ -1,7 +1,9 @@
 package io.github.dash52000.suivinutri.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
@@ -14,9 +16,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import io.github.dash52000.suivinutri.data.Usage
 import io.github.dash52000.suivinutri.repas.LignePhrase
@@ -41,10 +46,14 @@ private fun titreMoment(m: MomentRepas): String = when (m) {
 
 private fun libellePortion(p: PortionSource): String = when (p) {
     PortionSource.EXPLICITE -> "quantité dite"
+    PortionSource.UNITES -> "nombre dit, poids estimé"
     PortionSource.STANDARD -> "portion standard"
     PortionSource.PETITE -> "petite portion"
     PortionSource.GROSSE -> "grosse portion"
 }
+
+/** Jours repliés (clés ISO), conservés quand l'écran défile ou change d'onglet. */
+private val SauveurJoursReplies = listSaver<Set<String>, String>(save = { it.toList() }, restore = { it.toSet() })
 
 /** « ≈ 640 kcal (± 35 %) ». La marge est celle du modèle (σ log-normal), pas un intervalle à 95 %. */
 private fun texteKcal(kcal: Double, sigma: Double?): String =
@@ -66,6 +75,9 @@ internal fun CartePhrasesLues() {
     val enCours by ServicesRepas.enCours.collectAsState()
     var lignes by remember { mutableStateOf<List<LignePhrase>?>(null) }
     var erreur by remember { mutableStateOf<String?>(null) }
+    // Repli (demande du 27/11) : la carte entière, puis chaque jour. Tout est déplié par défaut, comme avant.
+    var ouvert by rememberSaveable { mutableStateOf(true) }
+    var joursReplies by rememberSaveable(stateSaver = SauveurJoursReplies) { mutableStateOf(emptySet<String>()) }
 
     LaunchedEffect(version) {
         try {
@@ -86,7 +98,18 @@ internal fun CartePhrasesLues() {
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("Phrases lues", style = MaterialTheme.typography.titleMedium)
+            EnTeteRepliable("Phrases lues", ouvert, MaterialTheme.typography.titleMedium) { ouvert = !ouvert }
+            if (!ouvert) {
+                if (liste.isNotEmpty()) {
+                    Text(
+                        "${liste.size} phrase${if (liste.size > 1) "s" else ""}" +
+                            (if (enAttente > 0) " · $enAttente en attente ou à relire" else ""),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return@Column
+            }
             Text(
                 "Ce que l'appli a compris de tes phrases des 14 derniers jours. Les kcal viennent de la table CIQUAL : " +
                     "ce sont des estimations avec leur marge, jamais un verdict.",
@@ -106,13 +129,15 @@ internal fun CartePhrasesLues() {
                 val total = duJour.mapNotNull { it.lu?.kcal }.takeIf { it.isNotEmpty() }?.sum()
                 // Un aliment non reconnu compte 0 : le total n'est alors qu'un minimum.
                 val incomplet = duJour.any { it.lu == null || it.lu.nonReconnus.isNotEmpty() }
-                Text(
+                val cle = jour.toString()
+                val ouvertCeJour = cle !in joursReplies
+                EnTeteRepliable(
                     jour.format(formatJourLong).replaceFirstChar { it.uppercase() } +
                         (total?.let { " · ${if (incomplet) "au moins " else ""}${nombre(it, 0)} kcal dans les phrases lues" } ?: ""),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-                duJour.forEach { LignePhraseLue(it, lecturEnCours = it.phrase.id in enCours) }
+                    ouvertCeJour,
+                    MaterialTheme.typography.titleSmall,
+                ) { joursReplies = if (ouvertCeJour) joursReplies + cle else joursReplies - cle }
+                if (ouvertCeJour) duJour.forEach { LignePhraseLue(it, lecturEnCours = it.phrase.id in enCours) }
             }
             if (liste.isNotEmpty()) {
                 Text(
@@ -128,6 +153,21 @@ internal fun CartePhrasesLues() {
                 }
             }
         }
+    }
+}
+
+/** Titre qu'un tap replie ou déplie : « ▾ » ouvert, « ▸ » replié. */
+@Composable
+private fun EnTeteRepliable(titre: String, ouvert: Boolean, style: TextStyle, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClickLabel = if (ouvert) "Masquer" else "Afficher", onClick = onClick)
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(if (ouvert) "▾" else "▸", style = style)
+        Text(titre, style = style, modifier = Modifier.weight(1f))
     }
 }
 

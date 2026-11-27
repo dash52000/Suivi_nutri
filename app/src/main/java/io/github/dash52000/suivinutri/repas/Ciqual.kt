@@ -229,6 +229,14 @@ internal object Texte {
 
     fun sansAccent(s: String): String = accents.replace(Normalizer.normalize(s, Normalizer.Form.NFD), "")
 
+    /**
+     * Forme comparable d'une phrase du repas (27/11) : minuscules, sans accent (« œ » = « oe »), ponctuation et espaces
+     * ramenés à un seul espace. Deux phrases de même forme sont lues une seule fois (`StockRepas.extractionIdentique`).
+     * Les pluriels et l'ordre des mots restent tels quels : « 2 œufs » et « 2 œuf » sont deux phrases.
+     */
+    fun phrase(texte: String): String =
+        separateurs.split(sansAccent(texte.lowercase().replace("œ", "oe").replace("æ", "ae"))).filter { it.isNotEmpty() }.joinToString(" ")
+
     // « pomme de terre » est un seul mot : sinon « pomme » (le fruit) ramène des pommes de terre.
     private val composes = Regex("pommes? de terre")
 

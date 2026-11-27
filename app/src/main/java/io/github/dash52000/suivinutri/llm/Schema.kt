@@ -22,9 +22,14 @@ import kotlinx.serialization.json.putJsonObject
  */
 object Schema {
 
-    const val VERSION_PROMPT = 2
+    /**
+     * 1 : premier prompt · 2 (26/11) : support et garniture en lignes distinctes, noms sans marque, whey ·
+     * 3 (27/11) : table des portions types en grammes, `portion_source` « unites » (nombre sans poids, marge 25 %),
+     * « explicite » réservé au poids ou au volume dit.
+     */
+    const val VERSION_PROMPT = 3
 
-    val PORTIONS = listOf("explicite", "standard", "grosse", "petite")
+    val PORTIONS = listOf("explicite", "unites", "standard", "grosse", "petite")
     val MOMENTS_ALIMENT = listOf("matin", "midi", "apres-midi", "soir", "nuit")
     val CONFIANCES = listOf("haute", "moyenne", "basse")
 
@@ -109,14 +114,18 @@ object Schema {
         - Sépare toujours le support de ce qu'on met dessus ou dedans, en lignes distinctes : « tartine de beurre de
           cacahuète et confiture » donne pain + beurre de cacahuète + confiture ; « tartine de St Moret » donne pain +
           fromage frais à tartiner ; « sandwich jambon beurre » donne pain + jambon + beurre. Une garniture sans quantité
-          dite prend une portion « standard » de garniture (de l'ordre de 10 à 30 g), pas celle d'un plat.
+          dite prend la portion de la table ci-dessous (de l'ordre de 10 à 30 g hors table), pas celle d'un plat.
         - Nom sans marque pour un aliment : « St Moret » donne « fromage frais à tartiner », « Nutella » donne « pâte à
           tartiner chocolat noisette ». Une poudre de protéine (whey, isolate) s'appelle « whey ».
-        - grammes : ton estimation de la quantité mangée, en grammes. Tu ne calcules jamais de calories ni de nutriments.
+        - grammes : la quantité mangée, en grammes. Si la phrase donne un poids, prends-le. Sinon, pour un aliment de la
+          table des portions types, prends le poids de la table (multiplié par le nombre d'unités dit) au lieu de le
+          deviner ; hors table, estime une portion ordinaire. Tu ne calcules jamais de calories ni de nutriments.
         - portion_source :
-          « explicite » si la quantité est donnée (grammes, nombre d'unités, « 3 œufs », « 2 tranches ») ;
+          « explicite » seulement si la phrase donne un poids ou un volume (« 200 g », « 33 cl », « 2 cuillères à soupe ») ;
+          « unites » si elle donne un nombre d'unités ou de pièces sans poids ni volume (« 1 tartine », « 2 crépinettes »,
+          « 1 steak haché », « 3 œufs », « 2 tranches ») : les grammes sont alors ceux de la table, ou ton estimation ;
           « grosse » ou « petite » si la phrase qualifie la portion (« grosse assiette », « un peu de », « petite part ») ;
-          « standard » sinon, et pour les mots vagues (« des », « quelques »).
+          « standard » sinon, et pour les mots vagues (« des », « quelques »), et pour une garniture sans quantité.
         - moment : seulement si la phrase précise l'heure ou le moment de cet aliment (« 16h » donne « apres-midi ») ; sinon null.
         - rab : true seulement pour la part resservie (« + ½ en rab », « resservi ») ; sinon false.
         - boissons : nom, format (« 33 cl », « verre », « bouteille ») et degré d'alcool s'ils sont dits ou évidents, sinon null.
@@ -125,6 +134,17 @@ object Schema {
           (« pas de dessert »), null sinon.
         - confiance : « haute » si la phrase est précise, « moyenne » si une partie est floue, « basse » si elle est vague.
         - N'invente rien : une information absente reste null.
+
+        Table des portions types : poids en grammes de ce qu'on mange (sans coquille ni peau), jamais des calories.
+        - tartine (une tranche de pain ou de baguette) : 35
+        - beurre, pâte à tartiner, beurre de cacahuète (sur une tartine) : 15
+        - confiture, miel (sur une tartine) : 20
+        - fromage frais à tartiner : 20
+        - fromage (une part ou une tranche) : 30
+        - tranche de jambon : 40
+        - œuf : 50
+        - yaourt : 125
+        - fruit moyen (pomme, poire, orange, banane) : 130
     """.trimIndent()
 
     /** Message utilisateur : le texte de la phrase et son moment, rien d'autre (fiche SPEC section 7). */
