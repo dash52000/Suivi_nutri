@@ -187,7 +187,7 @@ class TableCiqual private constructor(
             require(version != null) { "ciqual.tsv : ligne « #ciqual<TAB>version » absente." }
             require(aliments.isNotEmpty()) { "ciqual.tsv : aucun aliment." }
             require(aliments.map { it.code }.toSet().size == aliments.size) { "ciqual.tsv : codes en double." }
-            return TableCiqual(version, aliments)
+            return TableCiqual(version, aliments + HorsCiqual.aliments)
         }
 
         fun depuisTexte(texte: String): TableCiqual = depuisTsv(texte.lineSequence())
@@ -253,6 +253,18 @@ internal object Texte {
 }
 
 /**
+ * Aliments absents de CIQUAL, ajoutés à la table au chargement (codes « HC… », jamais confondus avec un code ANSES).
+ * Valeurs d'étiquettes courantes, pas une mesure de l'ANSES : à garder très court. Ajouté le 26/11 au soir, à la demande de
+ * Damien (la whey de ses phrases restait non reconnue, donc comptée 0).
+ */
+internal object HorsCiqual {
+    /** Whey isolat en poudre : ordre de grandeur des étiquettes (≈ 370 kcal, 85 g de protéines pour 100 g). */
+    val WHEY = AlimentCiqual("HC0001", "Whey, protéine de lactosérum isolée, poudre (hors CIQUAL)", "HC", 370.0, 85.0, 2.0, 1.0, 0.3, 0.0)
+
+    val aliments: List<AlimentCiqual> = listOf(WHEY)
+}
+
+/**
  * Noms courants que la table n'emploie pas. Courte, à compléter avec les « non reconnus » du journal d'usage
  * (un aliment non rapproché reste NA : rien n'est inventé).
  */
@@ -282,6 +294,29 @@ internal object Synonymes {
         "penne" to "pâtes",
         "fusilli" to "pâtes",
         "coquillettes" to "pâtes",
+        // 26/11 soir : non reconnus des premières vraies phrases (écran « Phrases lues »). Les noms composés d'abord.
+        "pâte de pistache" to "beurre de cacahuète",
+        "pate de pistache" to "beurre de cacahuète",
+        "crème de pistache" to "beurre de cacahuète",
+        "creme de pistache" to "beurre de cacahuète",
+        "crépinettes" to "saucisse de toulouse cuite",
+        "crépinette" to "saucisse de toulouse cuite",
+        "crepinettes" to "saucisse de toulouse cuite",
+        "crepinette" to "saucisse de toulouse cuite",
+        "spätzle" to "pâtes fraîches aux oeufs cuites",
+        "spaetzle" to "pâtes fraîches aux oeufs cuites",
+        "spätzles" to "pâtes fraîches aux oeufs cuites",
+        "spaetzles" to "pâtes fraîches aux oeufs cuites",
+        "st moret" to "fromage frais à tartiner",
+        "saint moret" to "fromage frais à tartiner",
+        "st môret" to "fromage frais à tartiner",
+        "carré frais" to "fromage frais à tartiner",
+        "philadelphia" to "fromage frais à tartiner",
+        "isolate whey" to "whey",
+        "whey isolate" to "whey",
+        "isolat de whey" to "whey",
+        "protéine whey" to "whey",
+        "proteine whey" to "whey",
     )
 
     fun appliquer(nom: String): String {

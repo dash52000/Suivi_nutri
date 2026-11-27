@@ -366,4 +366,65 @@ class StockRepasTest {
         assertEquals(Reponse.entries.toSet(), relu.tirages.map { it.reponse!! }.toSet())
         assertEquals(Origine.entries.toSet(), relu.phrases.filter { it.id.startsWith("o-") }.map { it.origine }.toSet())
     }
+
+    // ---------- Étape 6 : suppression et quantité ----------
+
+    @Test
+    fun supprimerUnePhraseRetireAussiSesExtractionsEtRendFauxSiInconnue() {
+        stock.ajouterPhrase(phrase("p1"))
+        stock.ajouterPhrase(phrase("p2", texte = "salade"))
+        stock.enregistrerExtraction(extraction("p1"))
+        stock.enregistrerExtraction(extraction("p1", v = 2))
+        stock.enregistrerExtraction(extraction("p2"))
+        assertTrue(stock.supprimerPhrase("p1"))
+        assertNull(stock.phrase("p1"))
+        assertEquals(listOf("p2"), stock.contenu().extractions.map { it.phraseId })
+        assertFalse(stock.supprimerPhrase("p1"))
+    }
+
+    @Test
+    fun laQuantiteSeStockeSeRelitEtSEfface() {
+        stock.ajouterPhrase(phrase("p1"))
+        assertTrue(stock.definirQuantite("p1", Quantite.GROSSE))
+        assertEquals(Quantite.GROSSE, StockRepas(fichier).phrase("p1")!!.quantite)
+        assertTrue(stock.definirQuantite("p1", null))
+        assertNull(StockRepas(fichier).phrase("p1")!!.quantite)
+        assertFalse(stock.definirQuantite("inconnue", Quantite.PETITE))
+    }
+
+    @Test
+    fun sansQuantiteLeFichierNeContientPasLaCleEtResteIdentiqueAAvantLEtapeSix() {
+        stock.ajouterPhrase(phrase("p1"))
+        assertFalse(fichier.readText().contains("quantite"))
+        stock.definirQuantite("p1", Quantite.NORMALE)
+        assertTrue(fichier.readText().contains("\"quantite\": \"normale\""))
+    }
+
+    @Test
+    fun unFichierDAvantLEtapeSixSansLaCleSeLitAvecQuantiteNull() {
+        stock.ajouterPhrase(phrase("p1"))
+        assertNull(StockRepas(fichier).phrase("p1")!!.quantite)
+    }
+
+    @Test
+    fun laQuantiteSurvitALExportEtALImport() {
+        stock.ajouterPhrase(phrase("p1"))
+        stock.definirQuantite("p1", Quantite.PETITE)
+        val autre = StockRepas(File(dossier, "autre.json"))
+        autre.importJson(stock.exportJson())
+        assertEquals(Quantite.PETITE, autre.phrase("p1")!!.quantite)
+    }
+
+    @Test
+    fun phrasesEnAttenteIncluentCellesLuesAvecUneAutreVersionDuPromptSeulementSiOnLaDonne() {
+        stock.ajouterPhrase(phrase("ancienne", Moment.MIDI))
+        stock.ajouterPhrase(phrase("recente", Moment.SOIR))
+        stock.enregistrerExtraction(extraction("ancienne", v = 1))
+        stock.enregistrerExtraction(extraction("recente", v = 2))
+        assertTrue(stock.phrasesEnAttente().isEmpty())
+        assertEquals(listOf("ancienne"), stock.phrasesEnAttente(versionPrompt = 2).map { it.id })
+        // Relue avec la version 2 : c'est l'extraction la plus récente qui fait foi.
+        stock.enregistrerExtraction(extraction("ancienne", v = 2, h = t0.plusSeconds(10)))
+        assertTrue(stock.phrasesEnAttente(versionPrompt = 2).isEmpty())
+    }
 }

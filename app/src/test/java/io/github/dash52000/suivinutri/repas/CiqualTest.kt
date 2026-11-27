@@ -26,7 +26,9 @@ class CiqualTest {
     @Test
     fun tableEmbarqueeCoherente() {
         assertEquals("2025-11-03", table.version)
-        assertEquals(3341, table.aliments.size)
+        // 3 341 aliments CIQUAL + les compléments hors CIQUAL (whey), codes « HC… ».
+        assertEquals(3341 + HorsCiqual.aliments.size, table.aliments.size)
+        assertEquals(3341, table.aliments.count { !it.code.startsWith("HC") })
         assertTrue(table.aliments.all { it.kcal in 0.0..950.0 })
         assertEquals(table.aliments.size, table.aliments.map { it.code }.toSet().size)
         assertNotNull(table.parCode("9811"))
@@ -35,7 +37,7 @@ class CiqualTest {
     @Test
     fun lectureRefuseUneTableMalformee() {
         val ok = "#ciqual\t2025-11-03\n#code\tnom\tgroupe\tkcal\tprot_g\tgluc_g\tlip_g\tsel_g\talcool_g\n1\tPain\t070101\t270.0\t8.0\t50.0\t1.0\t1.0\t0.0\n"
-        assertEquals(1, TableCiqual.depuisTexte(ok).aliments.size)
+        assertEquals(1 + HorsCiqual.aliments.size, TableCiqual.depuisTexte(ok).aliments.size)
         var refuse = false
         try { TableCiqual.depuisTexte("1\tPain\t070101\t270.0\n") } catch (e: IllegalArgumentException) { refuse = true }
         assertTrue(refuse)
@@ -203,5 +205,34 @@ class CiqualTest {
         val inconnu = Estimation.aliment(table, "xyzzy qwerty", 100.0, PortionSource.STANDARD, Confiance.HAUTE, Origine.TIREE, "midi", false)
         assertNull(Estimation.repas(listOf(inconnu), emptyList()))
         assertNull(Estimation.repas(emptyList(), emptyList()))
+    }
+
+    // ---------- Non reconnus des premières vraies phrases (26/11 au soir) ----------
+
+    @Test
+    fun nonReconnusDuVingtSixNovembreSontRapproches() {
+        val attendus = mapOf(
+            "crépinettes de porc" to "Saucisse de Toulouse cuite",
+            "crépinette de porc" to "Saucisse de Toulouse cuite",
+            "spätzle" to "Pâtes fraîches, aux oeufs, cuites",
+            "spaetzle" to "Pâtes fraîches, aux oeufs, cuites",
+            "pâte de pistache" to "Beurre de cacahuète",
+            "St Moret" to "Fromage frais ou spécialité fromagère non affinée, nature, à tartiner",
+            "isolate whey" to "Whey",
+            "whey" to "Whey",
+        )
+        for ((requete, debut) in attendus) {
+            val trouve = nom(requete)
+            assertNotNull("$requete non reconnu", trouve)
+            assertTrue("« $requete » → « $trouve » (attendu : $debut…)", trouve!!.startsWith(debut))
+        }
+    }
+
+    @Test
+    fun wheyHorsCiqualDonneSesKcalEtResteMarquee() {
+        val a = Estimation.aliment(table, "isolate whey", 25.0, PortionSource.EXPLICITE, Confiance.HAUTE, Origine.TIREE, null, false)
+        assertEquals("HC0001", a.codeCiqual)
+        assertEquals(92.5, a.kcal!!, 1e-9)
+        assertTrue(table.parCode("HC0001")!!.nom.contains("hors CIQUAL"))
     }
 }

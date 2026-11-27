@@ -204,6 +204,8 @@ private fun ListeDonnees(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // v1.18 : ce que l'appli a compris des phrases du repas, avec les kcal CIQUAL (invisible sans phrase ni clé).
+        item { CartePhrasesLues() }
         if (etat.compositionManquante) item {
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

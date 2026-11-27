@@ -27,6 +27,10 @@
     <!-- Nécessaire sur Android 13 et moins, où Health Connect est une appli à part -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
+        <!-- v1.18 : dictée des phrases du repas (RecognizerIntent), pour savoir si un service de reconnaissance existe -->
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <application

@@ -86,11 +86,18 @@ class StockRepas(private val fichier: File) {
     fun extractionRetenue(phraseId: String): Extraction? =
         contenu().extractions.filter { it.phraseId == phraseId }.maxByOrNull { it.horodatage }
 
-    /** Phrases sans aucune extraction : relues à l'ouverture suivante (hors ligne, chaîne en échec, appli fermée). */
-    fun phrasesEnAttente(): List<PhraseRepas> {
+    /**
+     * Phrases à (re)lire à l'ouverture suivante : sans aucune extraction (hors ligne, chaîne en échec, appli fermée) et,
+     * si [versionPrompt] est donnée, celles dont l'extraction retenue vient d'une autre version du prompt (26/11 : le
+     * prompt corrigé doit s'appliquer aussi aux phrases déjà lues). L'ancienne lecture reste affichée jusqu'à la nouvelle.
+     */
+    fun phrasesEnAttente(versionPrompt: Int? = null): List<PhraseRepas> {
         val c = contenu()
-        val lues = c.extractions.map { it.phraseId }.toSet()
-        return c.phrases.filter { it.id !in lues }.sortedWith(compareBy({ it.jour }, { it.moment.ordinal }, { it.horodatage }))
+        val retenues = c.extractions.groupBy { it.phraseId }.mapValues { (_, l) -> l.maxBy { it.horodatage } }
+        return c.phrases.filter { p ->
+            val e = retenues[p.id]
+            e == null || (versionPrompt != null && e.versionPrompt != versionPrompt)
+        }.sortedWith(compareBy({ it.jour }, { it.moment.ordinal }, { it.horodatage }))
     }
 
     /** Table des π en vigueur (valeurs de départ si jamais recalculée). */
@@ -102,6 +109,24 @@ class StockRepas(private val fichier: File) {
     fun ajouterPhrase(p: PhraseRepas) {
         val c = contenu()
         ecrire(c.copy(phrases = c.phrases.filter { it.id != p.id } + p))
+    }
+
+    /** Retire une phrase et ses extractions (correction d'une phrase : on supprime puis on recrée, nouvelle id). Faux si inconnue. */
+    @Synchronized
+    fun supprimerPhrase(id: String): Boolean {
+        val c = contenu()
+        if (c.phrases.none { it.id == id }) return false
+        ecrire(c.copy(phrases = c.phrases.filter { it.id != id }, extractions = c.extractions.filter { it.phraseId != id }))
+        return true
+    }
+
+    /** Le tap petite / normale / grosse d'une phrase (null l'efface). Faux si la phrase est inconnue. */
+    @Synchronized
+    fun definirQuantite(id: String, quantite: Quantite?): Boolean {
+        val c = contenu()
+        if (c.phrases.none { it.id == id }) return false
+        ecrire(c.copy(phrases = c.phrases.map { if (it.id == id) it.copy(quantite = quantite) else it }))
+        return true
     }
 
     @Synchronized
@@ -220,6 +245,7 @@ class StockRepas(private val fichier: File) {
                         put("origine", p.origine.code)
                         put("tardive", p.tardive)
                         put("horodatage", p.horodatage.toString())
+                        p.quantite?.let { put("quantite", it.code) } // absent = pas de tap (fichiers d'avant l'étape 6 inchangés)
                     })
                 }
             }
@@ -270,6 +296,7 @@ class StockRepas(private val fichier: File) {
                     origine = Origine.depuisCode(p.texte("origine")),
                     tardive = p.getValue("tardive").jsonPrimitive.boolean,
                     horodatage = Instant.parse(p.texte("horodatage")),
+                    quantite = p["quantite"]?.takeIf { it !is JsonNull }?.jsonPrimitive?.content?.let(Quantite::depuisCode),
                 )
             }
             val tirages = (o["tirages"]?.jsonArray ?: emptyList()).map { it.jsonObject }.map { t ->

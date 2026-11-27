@@ -21,6 +21,14 @@ import kotlin.math.sqrt
  */
 data class TapsSoir(val rab: Boolean? = null, val alcool: Boolean? = null) {
     val charge: Boolean get() = rab == true || alcool == true
+
+    companion object {
+        /** Depuis les réponses du jour : « resservi » un peu ou oui = rab ; « alcool » oui = alcool ; pas de tap = null. */
+        fun depuis(reponses: Map<String, String>) = TapsSoir(
+            rab = when (reponses["resservi"]) { "un_peu", "oui" -> true; "non" -> false; else -> null },
+            alcool = when (reponses["alcool"]) { "oui" -> true; "aucun" -> false; else -> null },
+        )
+    }
 }
 
 /** Valeurs de départ décidées le 26/11 (fiche SPEC section 5). */
