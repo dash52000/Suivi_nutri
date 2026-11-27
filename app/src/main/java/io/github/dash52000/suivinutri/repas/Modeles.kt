@@ -47,9 +47,16 @@ enum class Reponse(val code: String) {
     }
 }
 
-/** Mêmes codes que `Schema.PORTIONS` (vérifié par un test). */
+/**
+ * Mêmes codes que `Schema.PORTIONS` (vérifié par un test). Ce que dit la phrase, donc la marge (`Marges`) :
+ *  - EXPLICITE : un poids ou un volume est dit (« 200 g », « 33 cl », « 2 cuillères à soupe ») ;
+ *  - UNITES : un nombre d'unités sans poids (« 1 tartine », « 2 crépinettes ») : les grammes sont devinés
+ *    (table des portions types du prompt, sinon estimation) ; ajouté au prompt version 3 (27/11) ;
+ *  - STANDARD : aucune quantité (mots vagues, garniture sans quantité) ; c'est la seule qui reçoit le tap petite · normale · grosse ;
+ *  - GROSSE, PETITE : la phrase qualifie la portion.
+ */
 enum class PortionSource(val code: String) {
-    EXPLICITE("explicite"), STANDARD("standard"), GROSSE("grosse"), PETITE("petite");
+    EXPLICITE("explicite"), UNITES("unites"), STANDARD("standard"), GROSSE("grosse"), PETITE("petite");
 
     companion object {
         fun depuisCode(code: String): PortionSource = trouver(entries, code, { it.code }, "portion_source")

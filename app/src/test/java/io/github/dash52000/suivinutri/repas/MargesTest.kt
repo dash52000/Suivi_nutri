@@ -5,12 +5,13 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Fiche SPEC section 9.5 : explicite ±15 %, standard ±40 %, grosse / petite ±30 %, confiance basse × 1,5, spontanées × 1,5 décroissant. */
+/** Fiche SPEC section 9.5 : explicite ±15 %, nombre d'unités sans poids ±25 %, standard ±40 %, grosse / petite ±30 %, confiance basse × 1,5, spontanées × 1,5 décroissant. */
 class MargesTest {
 
     @Test
     fun margesParPortion() {
         assertEquals(0.15, Marges.sigmaPortion(PortionSource.EXPLICITE), 0.0)
+        assertEquals(0.25, Marges.sigmaPortion(PortionSource.UNITES), 0.0) // « 1 tartine », « 2 crépinettes » : le nombre est dit, pas le poids
         assertEquals(0.40, Marges.sigmaPortion(PortionSource.STANDARD), 0.0)
         assertEquals(0.30, Marges.sigmaPortion(PortionSource.GROSSE), 0.0)
         assertEquals(0.30, Marges.sigmaPortion(PortionSource.PETITE), 0.0)
@@ -22,6 +23,7 @@ class MargesTest {
         assertEquals(0.225, Marges.sigma(PortionSource.EXPLICITE, Confiance.BASSE, Origine.CHARGEE), 1e-12)
         assertEquals(0.4, Marges.sigma(PortionSource.STANDARD, Confiance.MOYENNE, Origine.TIREE), 1e-12)
         assertEquals(0.15, Marges.sigma(PortionSource.EXPLICITE, Confiance.HAUTE, Origine.TIREE), 1e-12)
+        assertEquals(0.375, Marges.sigma(PortionSource.UNITES, Confiance.BASSE, Origine.TIREE), 1e-12)
     }
 
     @Test
